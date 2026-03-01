@@ -1,11 +1,14 @@
 import { createClient } from '@supabase/supabase-js'
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
-)
+function getSupabase() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
+  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+  if (!url || !key) throw new Error('Missing Supabase env vars: NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY')
+  return createClient(url, key)
+}
 
 export async function GET(request) {
+  const supabase = getSupabase()
   const { searchParams } = new URL(request.url)
   const id = searchParams.get('id')
 
@@ -27,6 +30,7 @@ export async function GET(request) {
 }
 
 export async function PUT(request) {
+  const supabase = getSupabase()
   const body = await request.json()
   const { id, ...updates } = body
 
