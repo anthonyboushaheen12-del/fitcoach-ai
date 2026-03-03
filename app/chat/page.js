@@ -1,344 +1,269 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
-import { useRouter } from 'next/navigation'
-import { supabase } from '../../lib/supabase'
-import { getTrainer } from '../../lib/trainers'
+import { motion, AnimatePresence } from 'framer-motion'
+import { mockProfile, mockTrainers, mockChatMessages, quickReplies } from '../../lib/mock-data'
+
+const MOCK_RESPONSES = [
+  "Great question! Based on your current stats and our programming, here's what I'd recommend: focus on progressive overload this week — if you hit all your reps last session, add 2.5kg. Recovery is looking good based on your logs. 💪",
+  "Looking at your macros, you're on track! Protein is the priority — make sure you're hitting that 168g daily. Pre-workout meal about 60-90 min before training will help. You've got this!",
+  "Based on where you're at in the program, today's the perfect day to push intensity. Your body has adapted to the volume, now we need to keep the stimulus fresh. Let's go! 🔥",
+  "Rest days are part of the program, not a skip day. Active recovery — walk, stretch, foam roll — will actually accelerate your progress. Trust the process.",
+  "Your weight trend is exactly where we want it. Slow and steady fat loss preserves more muscle. You're doing everything right — stay patient and consistent!",
+]
+
+function TypingIndicator({ trainerEmoji }) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: 8 }}
+      transition={{ duration: 0.2 }}
+      style={{ display: 'flex', alignItems: 'flex-end', gap: 8, marginBottom: 16 }}
+    >
+      <div style={{
+        width: 32, height: 32, borderRadius: '50%', flexShrink: 0,
+        background: 'rgba(110,231,183,0.08)',
+        border: '1px solid rgba(110,231,183,0.12)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        fontSize: 16,
+      }}>{trainerEmoji}</div>
+      <div style={{
+        padding: '12px 16px',
+        background: 'rgba(14,20,14,0.55)',
+        backdropFilter: 'blur(24px)',
+        WebkitBackdropFilter: 'blur(24px)',
+        border: '1px solid rgba(110,231,183,0.07)',
+        borderRadius: '4px 18px 18px 18px',
+        display: 'flex', alignItems: 'center', gap: 5,
+      }}>
+        {[0, 1, 2].map(i => (
+          <motion.div key={i}
+            animate={{ y: [0, -5, 0] }}
+            transition={{ duration: 0.55, repeat: Infinity, delay: i * 0.12, ease: 'easeInOut' }}
+            style={{ width: 7, height: 7, borderRadius: '50%', background: '#6EE7B7', opacity: 0.8 }}
+          />
+        ))}
+      </div>
+    </motion.div>
+  )
+}
+
+function MessageBubble({ msg, trainerEmoji }) {
+  const isUser = msg.role === 'user'
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.25 }}
+      style={{
+        display: 'flex',
+        justifyContent: isUser ? 'flex-end' : 'flex-start',
+        alignItems: 'flex-end',
+        gap: 8,
+        marginBottom: 14,
+      }}
+    >
+      {!isUser && (
+        <div style={{
+          width: 32, height: 32, borderRadius: '50%', flexShrink: 0,
+          background: 'rgba(110,231,183,0.08)',
+          border: '1px solid rgba(110,231,183,0.12)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          fontSize: 16,
+        }}>{trainerEmoji}</div>
+      )}
+      <div style={{ maxWidth: '78%' }}>
+        <div style={{
+          padding: '12px 15px',
+          background: isUser
+            ? 'linear-gradient(135deg, #10B981, #6EE7B7)'
+            : 'rgba(14,20,14,0.55)',
+          backdropFilter: isUser ? 'none' : 'blur(24px)',
+          WebkitBackdropFilter: isUser ? 'none' : 'blur(24px)',
+          border: isUser ? 'none' : '1px solid rgba(110,231,183,0.07)',
+          borderRadius: isUser ? '18px 18px 4px 18px' : '4px 18px 18px 18px',
+          color: isUser ? '#070B07' : '#D1FAE5',
+          fontSize: 14, lineHeight: 1.55, fontWeight: isUser ? 600 : 400,
+        }}>
+          {msg.content}
+        </div>
+        <div style={{
+          fontSize: 10, color: '#1A3326', marginTop: 4,
+          textAlign: isUser ? 'right' : 'left', paddingLeft: isUser ? 0 : 4,
+        }}>
+          {msg.timestamp}
+        </div>
+      </div>
+    </motion.div>
+  )
+}
+
+let responseIndex = 0
 
 export default function Chat() {
-  const router = useRouter()
-  const [profile, setProfile] = useState(null)
-  const [messages, setMessages] = useState([])
+  const [messages, setMessages] = useState(mockChatMessages)
   const [input, setInput] = useState('')
-  const [loading, setLoading] = useState(false)
-  const [imagePreview, setImagePreview] = useState(null)
-  const [imageBase64, setImageBase64] = useState(null)
+  const [typing, setTyping] = useState(false)
   const messagesEndRef = useRef(null)
-  const fileInputRef = useRef(null)
+  const inputRef = useRef(null)
 
-  const trainer = profile ? getTrainer(profile.trainer) : getTrainer('bro')
-
-  useEffect(() => {
-    const stored = localStorage.getItem('profile')
-    if (!stored) { router.push('/'); return }
-    const p = JSON.parse(stored)
-    setProfile(p)
-    loadChatHistory(p.id)
-    refreshProfile(p.id)
-  }, [])
-
-  async function refreshProfile(profileId) {
-    try {
-      const { data } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', profileId)
-        .single()
-
-      if (data) {
-        setProfile(data)
-        localStorage.setItem('profile', JSON.stringify(data))
-      }
-    } catch (err) {
-      console.warn('Could not refresh profile from Supabase:', err)
-    }
-  }
+  const trainer = mockTrainers.find(t => t.id === mockProfile.trainer) || mockTrainers[2]
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages])
+  }, [messages, typing])
 
-  async function loadChatHistory(profileId) {
-    const { data } = await supabase
-      .from('chat_messages')
-      .select('*')
-      .eq('profile_id', profileId)
-      .order('created_at', { ascending: true })
-      .limit(50)
-
-    if (data && data.length > 0) {
-      setMessages(data.map(m => ({
-        role: m.role,
-        content: m.content,
-        image_url: m.image_url,
-      })))
-    }
-  }
-
-  function handleImageUpload(e) {
-    const file = e.target.files[0]
-    if (!file) return
-
-    const reader = new FileReader()
-    reader.onload = (event) => {
-      setImagePreview(event.target.result)
-      // Extract base64 data (remove the data:image/...;base64, prefix)
-      setImageBase64(event.target.result.split(',')[1])
-    }
-    reader.readAsDataURL(file)
-  }
-
-  function removeImage() {
-    setImagePreview(null)
-    setImageBase64(null)
-    if (fileInputRef.current) fileInputRef.current.value = ''
-  }
-
-  async function sendMessage() {
-    if ((!input.trim() && !imageBase64) || loading) return
-
-    const userMessage = {
-      role: 'user',
-      content: input.trim(),
-      image_url: imagePreview || null,
-    }
-
-    setMessages(prev => [...prev, userMessage])
+  const sendMessage = (text) => {
+    const content = (text || input).trim()
+    if (!content || typing) return
+    const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    setMessages(prev => [...prev, { role: 'user', content, timestamp: now }])
     setInput('')
-    setLoading(true)
-
-    const currentImage = imageBase64
-    removeImage()
-
-    try {
-      let onboardingContext = profile?.onboarding_context || null
-      if (!onboardingContext) {
-        const storedOnboarding = localStorage.getItem('onboardingContext')
-        if (storedOnboarding) {
-          try {
-            onboardingContext = JSON.parse(storedOnboarding)
-          } catch {
-            onboardingContext = null
-          }
-        }
-      }
-
-      // Save user message
-      await supabase.from('chat_messages').insert({
-        profile_id: profile.id,
-        role: 'user',
-        content: userMessage.content,
-        image_url: userMessage.image_url,
-        trainer: profile.trainer,
-      })
-
-      // Send to Claude
-      const res = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message: userMessage.content,
-          image: currentImage,
-          profile: profile,
-          trainerId: profile.trainer,
-          onboardingContext,
-          history: messages.slice(-20).map(m => ({
-            role: m.role,
-            content: m.content,
-          })),
-        }),
-      })
-
-      const data = await res.json()
-      const assistantMessage = {
-        role: 'assistant',
-        content: data.reply || 'Sorry, I had trouble responding. Try again!',
-      }
-
-      setMessages(prev => [...prev, assistantMessage])
-
-      // Save assistant message
-      await supabase.from('chat_messages').insert({
-        profile_id: profile.id,
-        role: 'assistant',
-        content: assistantMessage.content,
-        trainer: profile.trainer,
-      })
-    } catch (err) {
-      console.error('Chat error:', err)
-      setMessages(prev => [...prev, {
-        role: 'assistant',
-        content: 'Something went wrong. Check your API key and try again.',
-      }])
-    } finally {
-      setLoading(false)
-    }
+    setTyping(true)
+    setTimeout(() => {
+      const response = MOCK_RESPONSES[responseIndex % MOCK_RESPONSES.length]
+      responseIndex++
+      setTyping(false)
+      setMessages(prev => [...prev, { role: 'assistant', content: response, timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }])
+    }, 2000)
   }
 
-  if (!profile) return null
+  const handleKey = e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage() } }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 70px)' }}>
-      {/* Chat Header */}
-      <div style={{ padding: '18px 20px 12px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
+
+      {/* Header */}
+      <div style={{
+        padding: '16px 18px 14px',
+        background: 'rgba(7,11,7,0.88)',
+        backdropFilter: 'blur(20px)',
+        WebkitBackdropFilter: 'blur(20px)',
+        borderBottom: '1px solid rgba(110,231,183,0.06)',
+        flexShrink: 0,
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div style={{
+            width: 40, height: 40, borderRadius: '50%',
+            background: `${trainer.color}18`,
+            border: `1px solid ${trainer.color}40`,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: 20, flexShrink: 0,
+          }}>{trainer.emoji}</div>
           <div>
-            <h1 style={{ fontSize: 26, fontWeight: 800, letterSpacing: -0.8 }}>
-              <span style={{ color: '#6EE7B7' }}>Fit</span>
-              <span style={{ color: '#fff' }}>Coach</span>
-              <span className="gradient-accent" style={{ fontSize: 13, fontWeight: 600, marginLeft: 6 }}>AI</span>
-            </h1>
-            <p style={{ fontSize: 12, fontWeight: 500, marginTop: 3, color: trainer.color }}>
-              {trainer.emoji} Chatting with {trainer.name}
-            </p>
+            <div style={{ fontSize: 15, fontWeight: 700, color: '#E2FBE8' }}>{trainer.name}</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 1 }}>
+              <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#10B981' }} />
+              <span style={{ fontSize: 11, color: '#2D5B3F', fontWeight: 600 }}>Online</span>
+            </div>
           </div>
-          <button onClick={() => {
-            if (confirm('Clear chat history?')) {
-              supabase.from('chat_messages').delete().eq('profile_id', profile.id).then(() => {
-                setMessages([])
-              })
-            }
-          }} style={{
-            padding: '6px 12px', borderRadius: 10,
-            border: '1px solid rgba(110,231,183,0.1)',
-            background: 'transparent', color: '#2D5B3F',
-            fontSize: 11, fontWeight: 600,
-          }}>Clear</button>
         </div>
       </div>
 
       {/* Messages */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: '0 20px 20px' }}>
-        {messages.length === 0 && (
-          <div style={{ textAlign: 'center', padding: '40px 20px', color: '#2D5B3F' }}>
-            <div style={{ fontSize: 48, marginBottom: 12 }}>{trainer.emoji}</div>
-            <div style={{ fontSize: 16, fontWeight: 600, color: '#6EE7B7', marginBottom: 6 }}>
-              {trainer.name}
-            </div>
-            <div style={{ fontSize: 13, lineHeight: 1.6 }}>
-              {trainer.style}<br />
-              Send a message or upload a photo to get started!
-            </div>
-          </div>
-        )}
+      <div style={{
+        flex: 1, overflowY: 'auto', padding: '16px 16px 8px',
+        display: 'flex', flexDirection: 'column',
+      }}>
+        {/* "Today" separator */}
+        <div style={{ textAlign: 'center', marginBottom: 18 }}>
+          <span style={{
+            fontSize: 11, color: '#1A3326', fontWeight: 600,
+            padding: '4px 12px',
+            background: 'rgba(110,231,183,0.04)',
+            border: '1px solid rgba(110,231,183,0.06)',
+            borderRadius: 100,
+          }}>Today</span>
+        </div>
 
-        {messages.map((msg, i) => (
-          <div key={i} style={{
-            display: 'flex',
-            justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start',
-            marginBottom: 10,
-            alignItems: 'flex-end',
-          }}>
-            {msg.role === 'assistant' && (
-              <div style={{
-                width: 28, height: 28, borderRadius: 10,
-                background: 'linear-gradient(135deg, rgba(110,231,183,0.15), rgba(16,185,129,0.08))',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                fontSize: 14, marginRight: 8, flexShrink: 0,
-              }}>{trainer.emoji}</div>
-            )}
-            <div style={{
-              maxWidth: '78%',
-              padding: msg.image_url ? 5 : '12px 16px',
-              borderRadius: msg.role === 'user' ? '20px 20px 4px 20px' : '20px 20px 20px 4px',
-              background: msg.role === 'user'
-                ? 'linear-gradient(135deg, #F97316, #EC4899)'
-                : 'rgba(14,20,14,0.55)',
-              backdropFilter: msg.role === 'assistant' ? 'blur(24px)' : 'none',
-              color: msg.role === 'user' ? '#fff' : '#D1FAE5',
-              fontSize: 13.5, lineHeight: 1.55,
-              fontWeight: msg.role === 'user' ? 500 : 400,
-              border: msg.role === 'user' ? 'none' : '1px solid rgba(110,231,183,0.07)',
-              boxShadow: msg.role === 'user' ? '0 4px 15px rgba(249,115,22,0.2)' : 'none',
-              whiteSpace: 'pre-wrap',
-            }}>
-              {msg.image_url && (
-                <img src={msg.image_url} alt="Upload" style={{
-                  width: '100%', maxHeight: 200, objectFit: 'cover',
-                  borderRadius: 16, marginBottom: msg.content ? 8 : 0,
-                }} />
-              )}
-              {msg.content}
-            </div>
-          </div>
-        ))}
-
-        {loading && (
-          <div style={{ display: 'flex', alignItems: 'flex-end', marginBottom: 10 }}>
-            <div style={{
-              width: 28, height: 28, borderRadius: 10,
-              background: 'linear-gradient(135deg, rgba(110,231,183,0.15), rgba(16,185,129,0.08))',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: 14, marginRight: 8,
-            }}>{trainer.emoji}</div>
-            <div className="glass-sm" style={{
-              padding: '12px 20px', color: '#2D5B3F', fontSize: 13,
-            }}>
-              Thinking...
-            </div>
-          </div>
-        )}
-
+        <AnimatePresence initial={false}>
+          {messages.map((msg, i) => (
+            <MessageBubble key={i} msg={msg} trainerEmoji={trainer.emoji} />
+          ))}
+          {typing && <TypingIndicator key="typing" trainerEmoji={trainer.emoji} />}
+        </AnimatePresence>
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Image Preview */}
-      {imagePreview && (
-        <div style={{ padding: '0 20px 8px' }}>
-          <div style={{
-            position: 'relative', display: 'inline-block',
-            borderRadius: 12, overflow: 'hidden',
-            border: '1px solid rgba(249,115,22,0.3)',
-          }}>
-            <img src={imagePreview} alt="Preview" style={{ height: 80, borderRadius: 12 }} />
-            <button onClick={removeImage} style={{
-              position: 'absolute', top: 4, right: 4,
-              width: 22, height: 22, borderRadius: '50%',
-              background: 'rgba(0,0,0,0.7)', border: 'none',
-              color: '#fff', fontSize: 12, display: 'flex',
-              alignItems: 'center', justifyContent: 'center',
-            }}>✕</button>
-          </div>
-        </div>
-      )}
-
-      {/* Input Bar */}
-      <div style={{ padding: '12px 20px 16px' }}>
-        <div className="glass" style={{
-          display: 'flex', gap: 8,
-          borderRadius: 18, padding: '5px 5px 5px 14px',
-          alignItems: 'center',
-          boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
-        }}>
-          <input
-            type="file"
-            ref={fileInputRef}
-            accept="image/*"
-            onChange={handleImageUpload}
-            style={{ display: 'none' }}
-          />
-          <button onClick={() => fileInputRef.current?.click()} style={{
-            background: 'linear-gradient(135deg, rgba(249,115,22,0.15), rgba(236,72,153,0.1))',
-            border: 'none', borderRadius: 10,
-            width: 34, height: 34,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            fontSize: 16,
-          }}>📷</button>
-          <input
-            type="text"
-            placeholder="Ask your trainer anything..."
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
+      {/* Quick replies */}
+      <div style={{
+        padding: '8px 16px 6px',
+        overflowX: 'auto',
+        display: 'flex', gap: 8, flexShrink: 0,
+        scrollbarWidth: 'none',
+      }}>
+        {quickReplies.map((r, i) => (
+          <motion.button
+            key={i}
+            whileTap={{ scale: 0.95 }}
+            onClick={() => sendMessage(r)}
             style={{
-              flex: 1, background: 'none', border: 'none',
-              color: '#D1FAE5', fontSize: 14, fontWeight: 400,
+              padding: '7px 14px', borderRadius: 100, flexShrink: 0, cursor: 'pointer',
+              background: 'rgba(14,20,14,0.55)',
+              backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)',
+              border: '1px solid rgba(110,231,183,0.1)',
+              color: '#6EE7B7', fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap',
+            }}
+          >
+            {r}
+          </motion.button>
+        ))}
+      </div>
+
+      {/* Input bar */}
+      <div style={{
+        padding: '10px 14px 14px', flexShrink: 0,
+        background: 'rgba(7,11,7,0.9)',
+        backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
+        borderTop: '1px solid rgba(110,231,183,0.06)',
+      }}>
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 10,
+          background: 'rgba(14,20,14,0.55)',
+          backdropFilter: 'blur(24px)', WebkitBackdropFilter: 'blur(24px)',
+          border: '1px solid rgba(110,231,183,0.1)',
+          borderRadius: 100, padding: '8px 8px 8px 14px',
+        }}>
+          {/* Camera button */}
+          <button style={{
+            width: 34, height: 34, borderRadius: '50%', flexShrink: 0,
+            background: 'rgba(110,231,183,0.06)',
+            border: '1px solid rgba(110,231,183,0.08)',
+            color: '#2D5B3F', fontSize: 16, cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>📷</button>
+
+          <input
+            ref={inputRef}
+            value={input}
+            onChange={e => setInput(e.target.value)}
+            onKeyDown={handleKey}
+            placeholder="Ask your trainer..."
+            style={{
+              flex: 1, background: 'transparent', border: 'none', outline: 'none',
+              color: '#E2FBE8', fontSize: 14, fontFamily: "'Outfit', sans-serif",
+              fontWeight: 500,
             }}
           />
-          <button
-            onClick={sendMessage}
-            disabled={(!input.trim() && !imageBase64) || loading}
+
+          <motion.button
+            whileTap={{ scale: 0.9 }}
+            onClick={() => sendMessage()}
+            disabled={!input.trim() || typing}
             style={{
-              background: (input.trim() || imageBase64) && !loading
+              width: 36, height: 36, borderRadius: '50%', flexShrink: 0, cursor: 'pointer',
+              background: input.trim() && !typing
                 ? 'linear-gradient(135deg, #10B981, #6EE7B7)'
                 : 'rgba(110,231,183,0.08)',
-              border: 'none', borderRadius: 13,
-              width: 38, height: 38,
+              border: 'none',
+              color: input.trim() && !typing ? '#070B07' : '#1A3326',
+              fontSize: 16, fontWeight: 700,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
-              color: '#070B07', fontWeight: 800, fontSize: 17,
-              boxShadow: (input.trim() || imageBase64) ? '0 2px 10px rgba(16,185,129,0.3)' : 'none',
+              transition: 'all 0.2s ease',
+              boxShadow: input.trim() && !typing ? '0 0 12px rgba(110,231,183,0.3)' : 'none',
             }}
-          >↑</button>
+          >↑</motion.button>
         </div>
       </div>
     </div>
