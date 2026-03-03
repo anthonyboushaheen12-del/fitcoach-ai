@@ -147,3 +147,18 @@ input:focus, textarea:focus, select:focus {
   height: 300px;
   background: radial-gradient(circle, rgba(251, 191, 36, 0.04) 0%, transparent 55%);
 }
+
+/* Typing indicator bounce */
+.typing-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #6EE7B7;
+  animation: typingBounce 1.2s ease-in-out infinite;
+  animation-delay: calc(var(--delay, 0) * 0.2s);
+}
+
+@keyframes typingBounce {
+  0%, 60%, 100% { transform: translateY(0); }
+  30% { transform: translateY(-6px); }
+}

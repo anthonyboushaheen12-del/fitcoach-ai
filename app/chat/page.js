@@ -1,11 +1,14 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
-import { useRouter } from 'next/navigation'
+import React, { useState, useEffect, useRef, Suspense } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
+import { motion } from 'framer-motion'
 import { supabase } from '../../lib/supabase'
 import { getTrainer } from '../../lib/trainers'
+import TypingIndicator from '../components/TypingIndicator'
+import QuickReplies from '../components/QuickReplies'
 
-export default function Chat() {
+function ChatContent() {
   const router = useRouter()
   const [profile, setProfile] = useState(null)
   const [messages, setMessages] = useState([])
@@ -15,8 +18,15 @@ export default function Chat() {
   const [imageBase64, setImageBase64] = useState(null)
   const messagesEndRef = useRef(null)
   const fileInputRef = useRef(null)
+  const searchParams = useSearchParams()
 
   const trainer = profile ? getTrainer(profile.trainer) : getTrainer('bro')
+
+  useEffect(() => {
+    if (searchParams.get('prompt') === 'body' && !input) {
+      setInput('Can you assess my current physique? I\'ll upload a photo.')
+    }
+  }, [searchParams])
 
   useEffect(() => {
     const stored = localStorage.getItem('profile')
@@ -61,6 +71,7 @@ export default function Chat() {
         role: m.role,
         content: m.content,
         image_url: m.image_url,
+        created_at: m.created_at,
       })))
     }
   }
@@ -84,13 +95,15 @@ export default function Chat() {
     if (fileInputRef.current) fileInputRef.current.value = ''
   }
 
-  async function sendMessage() {
-    if ((!input.trim() && !imageBase64) || loading) return
+  async function sendMessage(overrideText) {
+    const text = (overrideText || input).trim()
+    if ((!text && !imageBase64) || loading) return
 
     const userMessage = {
       role: 'user',
-      content: input.trim(),
+      content: text,
       image_url: imagePreview || null,
+      created_at: new Date().toISOString(),
     }
 
     setMessages(prev => [...prev, userMessage])
@@ -145,6 +158,7 @@ export default function Chat() {
         content: data.reply || 'Sorry, I had trouble responding. Try again!',
       }
 
+      assistantMessage.created_at = new Date().toISOString()
       setMessages(prev => [...prev, assistantMessage])
 
       // Save assistant message
@@ -159,6 +173,7 @@ export default function Chat() {
       setMessages(prev => [...prev, {
         role: 'assistant',
         content: 'Something went wrong. Check your API key and try again.',
+        created_at: new Date().toISOString(),
       }])
     } finally {
       setLoading(false)
@@ -212,8 +227,34 @@ export default function Chat() {
           </div>
         )}
 
-        {messages.map((msg, i) => (
-          <div key={i} style={{
+        {messages.map((msg, i) => {
+          const prevTime = i > 0 ? messages[i - 1].created_at : null
+          const currTime = msg.created_at
+          const showTimestamp = prevTime && currTime && (new Date(currTime) - new Date(prevTime) > 3600000)
+          const formatTs = (iso) => {
+            const d = new Date(iso)
+            const now = new Date()
+            const diff = now - d
+            if (diff < 86400000) return 'Today'
+            if (diff < 172800000) return 'Yesterday'
+            return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+          }
+          return (
+          <React.Fragment key={i}>
+            {showTimestamp && (
+              <div style={{ textAlign: 'center', padding: '12px 0', fontSize: 11, color: '#1F4030', fontWeight: 500 }}>
+                {formatTs(currTime)}
+              </div>
+            )}
+            {msg.role === 'assistant' && i > 0 && messages[i - 1].image_url && (
+              <div style={{ fontSize: 11, color: '#2D5B3F', marginBottom: 4 }}>📷 Body Assessment</div>
+            )}
+          <motion.div
+            key={i}
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.2 }}
+            style={{
             display: 'flex',
             justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start',
             marginBottom: 10,
@@ -250,24 +291,11 @@ export default function Chat() {
               )}
               {msg.content}
             </div>
-          </div>
-        ))}
+          </motion.div>
+          </React.Fragment>
+        )})}
 
-        {loading && (
-          <div style={{ display: 'flex', alignItems: 'flex-end', marginBottom: 10 }}>
-            <div style={{
-              width: 28, height: 28, borderRadius: 10,
-              background: 'linear-gradient(135deg, rgba(110,231,183,0.15), rgba(16,185,129,0.08))',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: 14, marginRight: 8,
-            }}>{trainer.emoji}</div>
-            <div className="glass-sm" style={{
-              padding: '12px 20px', color: '#2D5B3F', fontSize: 13,
-            }}>
-              Thinking...
-            </div>
-          </div>
-        )}
+        {loading && <TypingIndicator trainerEmoji={trainer.emoji} />}
 
         <div ref={messagesEndRef} />
       </div>
@@ -278,7 +306,8 @@ export default function Chat() {
           <div style={{
             position: 'relative', display: 'inline-block',
             borderRadius: 12, overflow: 'hidden',
-            border: '1px solid rgba(249,115,22,0.3)',
+            border: '2px solid rgba(110,231,183,0.5)',
+            boxShadow: '0 0 20px rgba(110,231,183,0.2)',
           }}>
             <img src={imagePreview} alt="Preview" style={{ height: 80, borderRadius: 12 }} />
             <button onClick={removeImage} style={{
@@ -290,6 +319,11 @@ export default function Chat() {
             }}>✕</button>
           </div>
         </div>
+      )}
+
+      {/* Quick Replies - show when empty or after trainer response */}
+      {(messages.length === 0 || (messages.length > 0 && messages[messages.length - 1].role === 'assistant' && !loading)) && (
+        <QuickReplies onSelect={(text) => sendMessage(text)} />
       )}
 
       {/* Input Bar */}
@@ -342,5 +376,13 @@ export default function Chat() {
         </div>
       </div>
     </div>
+  )
+}
+
+export default function Chat() {
+  return (
+    <Suspense fallback={<div style={{ padding: 40, textAlign: 'center', color: '#2D5B3F' }}>Loading...</div>}>
+      <ChatContent />
+    </Suspense>
   )
 }
