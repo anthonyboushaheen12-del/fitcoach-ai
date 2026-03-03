@@ -1,15 +1,17 @@
 'use client'
 
 import './globals.css'
+import { useState } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
+import SplashScreen from './components/SplashScreen'
 
 export default function RootLayout({ children }) {
   const pathname = usePathname()
   const router = useRouter()
+  const [showSplash, setShowSplash] = useState(true)
 
-  // Don't show nav on onboarding page
   const isOnboarding = pathname === '/'
-  
+
   const tabs = [
     { id: '/dashboard', icon: '🏠', label: 'Home' },
     { id: '/chat', icon: '💬', label: 'Chat' },
@@ -25,11 +27,16 @@ export default function RootLayout({ children }) {
         <title>FitCoach AI</title>
       </head>
       <body>
-        {/* Ambient background effects */}
-        <div className="dot-grid" style={{ position: 'fixed', inset: 0, zIndex: 0 }} />
-        <div className="ambient-green" style={{ top: -180, left: '30%' }} />
-        <div className="ambient-pink" style={{ top: 100, right: -150 }} />
-        <div className="ambient-yellow" style={{ bottom: -80, left: -80 }} />
+        {/* Splash Screen */}
+        <SplashScreen visible={showSplash} onDone={() => setShowSplash(false)} />
+
+        {/* Dot grid background */}
+        <div className="dot-grid" style={{ position: 'fixed', inset: 0, zIndex: 0, pointerEvents: 'none' }} />
+
+        {/* Ambient glow blobs */}
+        <div className="ambient-green" style={{ top: -180, left: '30%', pointerEvents: 'none' }} />
+        <div className="ambient-pink" style={{ top: 100, right: -150, pointerEvents: 'none' }} />
+        <div className="ambient-yellow" style={{ bottom: -80, left: -80, pointerEvents: 'none' }} />
 
         {/* Main content */}
         <main style={{
@@ -43,7 +50,7 @@ export default function RootLayout({ children }) {
           {children}
         </main>
 
-        {/* Bottom Navigation - hidden on onboarding */}
+        {/* Bottom Navigation */}
         {!isOnboarding && (
           <nav style={{
             position: 'fixed',
@@ -54,52 +61,61 @@ export default function RootLayout({ children }) {
             maxWidth: 480,
             display: 'flex',
             justifyContent: 'space-around',
-            padding: '8px 0 14px',
-            background: 'rgba(7,11,7,0.92)',
+            padding: '8px 0 16px',
+            background: 'rgba(7,11,7,0.94)',
             borderTop: '1px solid rgba(110,231,183,0.06)',
             backdropFilter: 'blur(20px)',
             WebkitBackdropFilter: 'blur(20px)',
             zIndex: 10,
           }}>
-            {tabs.map((tab) => (
-              <button
-                key={tab.id}
-                onClick={() => router.push(tab.id)}
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  padding: '4px 16px',
-                  textAlign: 'center',
-                  position: 'relative',
-                }}
-              >
-                <div style={{
-                  fontSize: 19,
-                  filter: pathname === tab.id ? 'none' : 'grayscale(1) opacity(0.25)',
-                  transition: 'all 0.2s ease',
-                }}>{tab.icon}</div>
-                <div style={{
-                  fontSize: 10,
-                  fontWeight: 700,
-                  marginTop: 2,
-                  color: pathname === tab.id ? '#6EE7B7' : '#1A3326',
-                  transition: 'color 0.2s ease',
-                }}>{tab.label}</div>
-                {pathname === tab.id && (
+            {tabs.map((tab) => {
+              const isActive = pathname === tab.id
+              return (
+                <button
+                  key={tab.id}
+                  onClick={() => router.push(tab.id)}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    padding: '4px 18px',
+                    textAlign: 'center',
+                    position: 'relative',
+                    cursor: 'pointer',
+                  }}
+                >
+                  {isActive && (
+                    <div style={{
+                      position: 'absolute',
+                      top: -8,
+                      left: '50%',
+                      transform: 'translateX(-50%)',
+                      width: 22,
+                      height: 3,
+                      borderRadius: 100,
+                      background: 'linear-gradient(90deg, #10B981, #6EE7B7)',
+                      boxShadow: '0 0 10px rgba(110,231,183,0.5)',
+                    }} />
+                  )}
                   <div style={{
-                    position: 'absolute',
-                    top: -8,
-                    left: '50%',
-                    transform: 'translateX(-50%)',
-                    width: 20,
-                    height: 3,
-                    borderRadius: 100,
-                    background: 'linear-gradient(90deg, #10B981, #6EE7B7)',
-                    boxShadow: '0 0 8px rgba(110,231,183,0.4)',
-                  }} />
-                )}
-              </button>
-            ))}
+                    fontSize: 20,
+                    filter: isActive ? 'none' : 'grayscale(1) opacity(0.22)',
+                    transition: 'filter 0.2s ease',
+                  }}>
+                    {tab.icon}
+                  </div>
+                  <div style={{
+                    fontSize: 10,
+                    fontWeight: 700,
+                    marginTop: 2,
+                    color: isActive ? '#6EE7B7' : '#1A3326',
+                    transition: 'color 0.2s ease',
+                    letterSpacing: 0.3,
+                  }}>
+                    {tab.label}
+                  </div>
+                </button>
+              )
+            })}
           </nav>
         )}
       </body>
