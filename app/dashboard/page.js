@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { motion } from 'framer-motion'
 import { supabase } from '../../lib/supabase'
 import { trainers as trainersList, getTrainer } from '../../lib/trainers'
+import { useAuth } from '../components/AuthProvider'
 import ProgressChart from '../components/ProgressChart'
 import WeightModal from '../components/WeightModal'
 import TrainerModal from '../components/TrainerModal'
@@ -19,7 +20,7 @@ function getGreeting(name) {
 
 export default function Dashboard() {
   const router = useRouter()
-  const [profile, setProfile] = useState(null)
+  const { user, profile: authProfile, loading: authLoading, refreshProfile } = useAuth()
   const [plans, setPlans] = useState({ workout: null, meal: null })
   const [weightLogs, setWeightLogs] = useState([])
   const [loading, setLoading] = useState(true)
@@ -28,32 +29,28 @@ export default function Dashboard() {
   const [trainerModalOpen, setTrainerModalOpen] = useState(false)
   const [toast, setToast] = useState(null)
 
+  const profile = authProfile
   const trainer = profile ? getTrainer(profile.trainer) : getTrainer('bro')
 
   useEffect(() => {
-    loadProfile()
-  }, [])
-
-  async function loadProfile() {
-    const profileId = localStorage.getItem('profileId')
-    if (!profileId) {
+    if (!user) {
       router.push('/')
       return
     }
-
-    const { data: profileData } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', profileId)
-      .single()
-
-    if (!profileData) {
-      router.push('/')
+    if (user && !authProfile) {
+      router.push('/onboarding')
       return
     }
+  }, [user, authProfile, router])
 
-    setProfile(profileData)
-    localStorage.setItem('profile', JSON.stringify(profileData))
+  useEffect(() => {
+    if (!profile?.id) return
+    loadPlansAndWeightLogs()
+  }, [profile?.id])
+
+  async function loadPlansAndWeightLogs() {
+    if (!profile) return
+    const profileId = profile.id
 
     const { data: plansData } = await supabase
       .from('plans')
@@ -75,13 +72,13 @@ export default function Dashboard() {
       .limit(60)
 
     const built = []
-    const startDate = profileData?.created_at ? new Date(profileData.created_at).toISOString().split('T')[0] : new Date().toISOString().split('T')[0]
+    const startDate = profile?.created_at ? new Date(profile.created_at).toISOString().split('T')[0] : new Date().toISOString().split('T')[0]
     if (!logs || logs.length === 0) {
-      built.push({ date: new Date().toISOString().split('T')[0], weight_kg: profileData.weight_kg })
+      built.push({ date: new Date().toISOString().split('T')[0], weight_kg: profile.weight_kg })
     } else {
       const hasStart = logs.some((l) => ((l.logged_at || l.created_at || '') + '').split('T')[0] === startDate)
-      if (!hasStart && profileData.created_at) {
-        built.push({ date: startDate, weight_kg: profileData.weight_kg })
+      if (!hasStart && profile.created_at) {
+        built.push({ date: startDate, weight_kg: profile.weight_kg })
       }
       logs.forEach((l) => {
         const raw = l.logged_at || l.created_at || new Date().toISOString()
@@ -122,7 +119,10 @@ export default function Dashboard() {
         }),
       })
       const data = await res.json()
-      if (data.success) await loadProfile()
+      if (data.success) {
+        await refreshProfile()
+        await loadPlansAndWeightLogs()
+      }
     } catch (err) {
       console.error('Error generating plans:', err)
     } finally {
@@ -136,10 +136,8 @@ export default function Dashboard() {
       profile_id: profile.id,
       weight_kg: weightKg,
     })
-    const updated = { ...profile, weight_kg: weightKg }
-    setProfile(updated)
     await supabase.from('profiles').update({ weight_kg: weightKg }).eq('id', profile.id)
-    localStorage.setItem('profile', JSON.stringify(updated))
+    await refreshProfile()
     setWeightLogs((prev) => {
       const today = new Date().toISOString().split('T')[0]
       const idx = prev.findIndex((d) => d.date === today)
@@ -157,13 +155,12 @@ export default function Dashboard() {
   async function handleSelectTrainer(t) {
     if (!profile) return
     await supabase.from('profiles').update({ trainer: t.id }).eq('id', profile.id)
-    setProfile((prev) => ({ ...prev, trainer: t.id }))
-    localStorage.setItem('profile', JSON.stringify({ ...profile, trainer: t.id }))
+    await refreshProfile()
     setToast(`Switched to ${t.name}`)
     setTimeout(() => setToast(null), 2000)
   }
 
-  if (loading || !profile) {
+  if (authLoading || loading || !profile) {
     return (
       <div style={{ padding: 40, textAlign: 'center', color: '#2D5B3F' }}>
         <motion.div animate={{ rotate: 360 }} transition={{ duration: 1, repeat: Infinity, ease: 'linear' }} style={{ fontSize: 32, marginBottom: 12 }}>🏋️</motion.div>

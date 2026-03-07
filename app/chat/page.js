@@ -5,12 +5,13 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { motion } from 'framer-motion'
 import { supabase } from '../../lib/supabase'
 import { getTrainer } from '../../lib/trainers'
+import { useAuth } from '../components/AuthProvider'
 import TypingIndicator from '../components/TypingIndicator'
 import QuickReplies from '../components/QuickReplies'
 
 function ChatContent() {
   const router = useRouter()
-  const [profile, setProfile] = useState(null)
+  const { user, profile } = useAuth()
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
@@ -23,36 +24,25 @@ function ChatContent() {
   const trainer = profile ? getTrainer(profile.trainer) : getTrainer('bro')
 
   useEffect(() => {
+    if (!user) {
+      router.push('/')
+      return
+    }
+    if (user && !profile) {
+      router.push('/onboarding')
+      return
+    }
+  }, [user, profile, router])
+
+  useEffect(() => {
     if (searchParams.get('prompt') === 'body' && !input) {
       setInput('Can you assess my current physique? I\'ll upload a photo.')
     }
   }, [searchParams])
 
   useEffect(() => {
-    const stored = localStorage.getItem('profile')
-    if (!stored) { router.push('/'); return }
-    const p = JSON.parse(stored)
-    setProfile(p)
-    loadChatHistory(p.id)
-    refreshProfile(p.id)
-  }, [])
-
-  async function refreshProfile(profileId) {
-    try {
-      const { data } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', profileId)
-        .single()
-
-      if (data) {
-        setProfile(data)
-        localStorage.setItem('profile', JSON.stringify(data))
-      }
-    } catch (err) {
-      console.warn('Could not refresh profile from Supabase:', err)
-    }
-  }
+    if (profile?.id) loadChatHistory(profile.id)
+  }, [profile?.id])
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })

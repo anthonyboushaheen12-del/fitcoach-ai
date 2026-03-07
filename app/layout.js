@@ -5,13 +5,14 @@ import { usePathname, useRouter } from 'next/navigation'
 import { useState, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import SplashScreen from './components/SplashScreen'
+import { AuthProvider } from './components/AuthProvider'
 
 export default function RootLayout({ children }) {
   const pathname = usePathname()
   const router = useRouter()
   const [splashDone, setSplashDone] = useState(false)
 
-  const isOnboarding = pathname === '/'
+  const hideNav = pathname === '/' || pathname === '/onboarding'
 
   const tabs = [
     { id: '/dashboard', icon: '🏠', label: 'Home' },
@@ -38,14 +39,15 @@ export default function RootLayout({ children }) {
 
         <SplashScreen onComplete={handleSplashComplete} />
 
-        {/* Main content */}
-        <main style={{
+        <AuthProvider>
+          {/* Main content */}
+          <main style={{
             maxWidth: 480,
             margin: '0 auto',
             position: 'relative',
             zIndex: 1,
             minHeight: '100vh',
-            paddingBottom: isOnboarding ? 0 : 70,
+            paddingBottom: hideNav ? 0 : 70,
           }}>
             <AnimatePresence mode="wait">
               <motion.div
@@ -60,10 +62,11 @@ export default function RootLayout({ children }) {
             </AnimatePresence>
           </main>
 
-        {/* Bottom Navigation - hidden on onboarding */}
-        {!isOnboarding && (
-          <NavBar tabs={tabs} pathname={pathname} router={router} />
-        )}
+          {/* Bottom Navigation - hidden on auth and onboarding */}
+          {!hideNav && (
+            <NavBar tabs={tabs} pathname={pathname} router={router} />
+          )}
+        </AuthProvider>
       </body>
     </html>
   )

@@ -5,13 +5,14 @@ import { useRouter } from 'next/navigation'
 import { motion } from 'framer-motion'
 import { supabase } from '../../lib/supabase'
 import { getTrainer } from '../../lib/trainers'
+import { useAuth } from '../components/AuthProvider'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const MEAL_EMOJIS = ['🍳', '🥗', '🍌', '🥩']
 
 export default function Plans() {
   const router = useRouter()
-  const [profile, setProfile] = useState(null)
+  const { user, profile } = useAuth()
   const [plans, setPlans] = useState([])
   const [loading, setLoading] = useState(true)
   const [view, setView] = useState('today')
@@ -19,12 +20,14 @@ export default function Plans() {
   const [checkedExercises, setCheckedExercises] = useState({})
 
   useEffect(() => {
-    const stored = localStorage.getItem('profile')
-    if (!stored) { router.push('/'); return }
-    const p = JSON.parse(stored)
-    setProfile(p)
-    loadPlans(p.id)
-  }, [])
+    if (!user) { router.push('/'); return }
+    if (user && !profile) { router.push('/onboarding'); return }
+  }, [user, profile, router])
+
+  useEffect(() => {
+    if (!profile?.id) return
+    loadPlans(profile.id)
+  }, [profile?.id])
 
   async function loadPlans(profileId) {
     const { data } = await supabase

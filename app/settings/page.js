@@ -4,13 +4,15 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '../../lib/supabase'
 import { getTrainer } from '../../lib/trainers'
+import { useAuth } from '../components/AuthProvider'
 import WeightModal from '../components/WeightModal'
 import TrainerModal from '../components/TrainerModal'
 import ProgressChart from '../components/ProgressChart'
 
 export default function Settings() {
   const router = useRouter()
-  const [profile, setProfile] = useState(null)
+  const { user, profile: authProfile, refreshProfile, signOut } = useAuth()
+  const [profile, setProfile] = useState(authProfile)
   const [weightLogs, setWeightLogs] = useState([])
   const [saving, setSaved] = useState(false)
   const [weightModalOpen, setWeightModalOpen] = useState(false)
@@ -18,12 +20,18 @@ export default function Settings() {
   const [savedMsg, setSavedMsg] = useState(false)
 
   useEffect(() => {
-    const stored = localStorage.getItem('profile')
-    if (!stored) { router.push('/'); return }
-    const p = JSON.parse(stored)
-    setProfile(p)
-    loadWeightLogs(p.id, p.weight_kg)
-  }, [])
+    if (!user) { router.push('/'); return }
+    if (user && !authProfile) { router.push('/onboarding'); return }
+  }, [user, authProfile, router])
+
+  useEffect(() => {
+    setProfile(authProfile)
+  }, [authProfile])
+
+  useEffect(() => {
+    if (!profile?.id) return
+    loadWeightLogs(profile.id, profile.weight_kg)
+  }, [profile?.id])
 
   async function loadWeightLogs(profileId, currentWeight) {
     const { data } = await supabase
@@ -179,12 +187,7 @@ export default function Settings() {
         </div>
         <div style={{ marginBottom: 12 }}>
           <label style={{ fontSize: 11, color: '#2D5B3F', fontWeight: 600, marginBottom: 4, display: 'block' }}>Goal</label>
-          <select value={profile.goal} onChange={(e) => update('goal', e.target.value)} style={{ ...inputStyle, appearance: 'auto' }}>
-            <option value="lose_fat">Lose Fat</option>
-            <option value="build_muscle">Build Muscle</option>
-            <option value="recomp">Body Recomp</option>
-            <option value="maintain">Maintain</option>
-          </select>
+          <textarea value={profile.goal || ''} onChange={(e) => update('goal', e.target.value)} rows={3} style={{ ...inputStyle, resize: 'vertical', minHeight: 72 }} placeholder="e.g. Lose 8kg in 4 months, get a bigger chest with visible abs" />
         </div>
         <button onClick={saveProfile} disabled={saved} style={{
           width: '100%', padding: 16, borderRadius: 14, border: 'none',
@@ -293,6 +296,20 @@ export default function Settings() {
           fontSize: 14, fontWeight: 600, textAlign: 'left',
         }}>
           Clear Chat History
+        </button>
+        <button onClick={signOut} style={{
+          width: '100%', padding: 14, borderRadius: 12, marginBottom: 10,
+          border: '1px solid rgba(249,115,22,0.3)', background: 'rgba(249,115,22,0.08)', color: '#F97316',
+          fontSize: 14, fontWeight: 600, textAlign: 'left',
+        }}>
+          Sign Out
+        </button>
+        <button onClick={async () => { await signOut() }} style={{
+          width: '100%', padding: 14, borderRadius: 12, marginBottom: 10,
+          border: '1px solid rgba(110,231,183,0.25)', background: 'transparent', color: '#6EE7B7',
+          fontSize: 14, fontWeight: 600, textAlign: 'left',
+        }}>
+          Sign Out
         </button>
         <button onClick={resetAccount} style={{
           width: '100%', padding: 14, borderRadius: 12,
