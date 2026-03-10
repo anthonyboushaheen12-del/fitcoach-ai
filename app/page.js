@@ -56,12 +56,18 @@ export default function AuthPage() {
   const handleSignIn = async (e) => {
     e.preventDefault()
     setError('')
+    setPendingConfirmation(null)
     setSubmitting(true)
     try {
       await signIn(email, password)
-      // AuthProvider will update user/profile; redirect happens via top-level check on re-render
     } catch (err) {
-      setError(err?.message || 'Sign in failed')
+      const msg = err?.message || ''
+      if (msg.toLowerCase().includes('email') && msg.toLowerCase().includes('confirm')) {
+        setPendingConfirmation(email)
+        setError('')
+      } else {
+        setError(msg || 'Sign in failed')
+      }
     } finally {
       setSubmitting(false)
     }
@@ -188,7 +194,54 @@ export default function AuthPage() {
         className="glass"
         style={{ width: '100%', maxWidth: 320, padding: 24 }}
       >
-        {tab === 'signin' ? (
+        {pendingConfirmation ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <div style={{ fontSize: 15, color: '#D1FAE5', textAlign: 'center', lineHeight: 1.6 }}>
+              {tab === 'signin' ? 'Your email has not been confirmed yet.' : 'Account created.'} Check your email (and spam folder) for the confirmation link.
+              <br />
+              <span style={{ fontSize: 13, color: '#2D5B3F' }}>{pendingConfirmation}</span>
+            </div>
+            <div style={{ fontSize: 11, color: '#1F4030', textAlign: 'center', lineHeight: 1.5 }}>
+              Not receiving emails? Confirm email is now disabled in Supabase — try signing up again with a new email.
+            </div>
+            {resendSent && <div style={{ color: '#6EE7B7', fontSize: 13, textAlign: 'center' }}>Verification email sent. Check your inbox.</div>}
+            {error && <div style={{ color: '#FB7185', fontSize: 13 }}>{error}</div>}
+            <button
+              type="button"
+              onClick={handleResendConfirmation}
+              disabled={resending}
+              style={{
+                width: '100%',
+                padding: 14,
+                borderRadius: 14,
+                border: '1px solid rgba(110,231,183,0.3)',
+                background: 'rgba(16,185,129,0.15)',
+                color: '#6EE7B7',
+                fontSize: 14,
+                fontWeight: 600,
+                opacity: resending ? 0.7 : 1,
+              }}
+            >
+              {resending ? 'Sending...' : 'Resend verification email'}
+            </button>
+            <button
+              type="button"
+              onClick={() => { setPendingConfirmation(null); setResendSent(false); setError('') }}
+              style={{
+                width: '100%',
+                padding: 12,
+                borderRadius: 14,
+                border: '1px solid rgba(110,231,183,0.15)',
+                background: 'transparent',
+                color: '#2D5B3F',
+                fontSize: 13,
+                fontWeight: 600,
+              }}
+            >
+              Back
+            </button>
+          </div>
+        ) : tab === 'signin' ? (
           <form onSubmit={handleSignIn} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             <div>
               <label style={{ fontSize: 12, color: '#2D5B3F', fontWeight: 600, marginBottom: 6, display: 'block' }}>Email</label>
@@ -232,50 +285,6 @@ export default function AuthPage() {
               {submitting ? 'Signing in...' : 'Sign In'}
             </button>
           </form>
-        ) : pendingConfirmation ? (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            <div style={{ fontSize: 15, color: '#D1FAE5', textAlign: 'center', lineHeight: 1.6 }}>
-              Account created. Check your email for the confirmation link.
-              <br />
-              <span style={{ fontSize: 13, color: '#2D5B3F' }}>{pendingConfirmation}</span>
-            </div>
-            {resendSent && <div style={{ color: '#6EE7B7', fontSize: 13, textAlign: 'center' }}>Verification email sent. Check your inbox.</div>}
-            {error && <div style={{ color: '#FB7185', fontSize: 13 }}>{error}</div>}
-            <button
-              type="button"
-              onClick={handleResendConfirmation}
-              disabled={resending}
-              style={{
-                width: '100%',
-                padding: 14,
-                borderRadius: 14,
-                border: '1px solid rgba(110,231,183,0.3)',
-                background: 'rgba(16,185,129,0.15)',
-                color: '#6EE7B7',
-                fontSize: 14,
-                fontWeight: 600,
-                opacity: resending ? 0.7 : 1,
-              }}
-            >
-              {resending ? 'Sending...' : 'Resend verification email'}
-            </button>
-            <button
-              type="button"
-              onClick={() => { setPendingConfirmation(null); setResendSent(false); setError('') }}
-              style={{
-                width: '100%',
-                padding: 12,
-                borderRadius: 14,
-                border: '1px solid rgba(110,231,183,0.15)',
-                background: 'transparent',
-                color: '#2D5B3F',
-                fontSize: 13,
-                fontWeight: 600,
-              }}
-            >
-              Back to sign up
-            </button>
-          </div>
         ) : (
           <form onSubmit={handleSignUp} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             <div>

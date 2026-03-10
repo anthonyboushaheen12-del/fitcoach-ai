@@ -27,7 +27,6 @@ export default function Dashboard() {
   const [plans, setPlans] = useState({ workout: null, meal: null })
   const [weightLogs, setWeightLogs] = useState([])
   const [loading, setLoading] = useState(true)
-  const [generating, setGenerating] = useState(false)
   const [weightModalOpen, setWeightModalOpen] = useState(false)
   const [trainerModalOpen, setTrainerModalOpen] = useState(false)
   const [foodLogModalOpen, setFoodLogModalOpen] = useState(false)
@@ -104,44 +103,6 @@ export default function Dashboard() {
     setWeightLogs(built)
 
     setLoading(false)
-  }
-
-  async function generatePlans() {
-    if (!profile) return
-    setGenerating(true)
-    try {
-      let onboardingContext = profile?.onboarding_context || null
-      if (!onboardingContext) {
-        const storedOnboarding = localStorage.getItem('onboardingContext')
-        if (storedOnboarding) {
-          try {
-            onboardingContext = JSON.parse(storedOnboarding)
-          } catch {
-            onboardingContext = null
-          }
-        }
-      }
-
-      const res = await fetch('/api/generate-plan', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          profileId: profile.id,
-          profile: profile,
-          trainerId: profile.trainer,
-          onboardingContext,
-        }),
-      })
-      const data = await res.json()
-      if (data.success) {
-        await refreshProfile()
-        await loadPlansAndWeightLogs()
-      }
-    } catch (err) {
-      console.error('Error generating plans:', err)
-    } finally {
-      setGenerating(false)
-    }
   }
 
   async function handleLogWeight(weightKg) {
@@ -398,33 +359,32 @@ export default function Dashboard() {
             </div>
           </div>
         ) : (
-          <div className="glass" style={{ padding: 24, marginBottom: 14, textAlign: 'center' }}>
-            <div style={{ fontSize: 16, fontWeight: 700, color: '#fff', marginBottom: 8 }}>Your trainer is ready</div>
-            <div style={{ fontSize: 13, color: '#2D5B3F', marginBottom: 16 }}>Generate your custom workout and meal plan</div>
+          <div className="glass" style={{ padding: 24, marginBottom: 14, textAlign: 'center', border: '1px dashed rgba(110,231,183,0.2)' }}>
+            <div style={{ fontSize: 28, marginBottom: 12 }}>🏋️</div>
+            <div style={{ fontSize: 16, fontWeight: 700, color: '#fff', marginBottom: 8 }}>No Workout Plan Yet</div>
+            <div style={{ fontSize: 13, color: '#2D5B3F', marginBottom: 16 }}>Create your personalized workout plan</div>
             <button
-              onClick={generatePlans}
-              disabled={generating}
+              onClick={() => router.push('/plans?start=workout')}
               style={{
                 width: '100%',
                 padding: 16,
                 borderRadius: 14,
                 border: 'none',
-                background: 'linear-gradient(135deg, #F97316, #EC4899)',
-                color: '#fff',
+                background: 'linear-gradient(135deg, #10B981, #6EE7B7)',
+                color: '#070B07',
                 fontSize: 15,
                 fontWeight: 700,
-                boxShadow: '0 4px 20px rgba(249,115,22,0.25)',
-                opacity: generating ? 0.6 : 1,
+                boxShadow: '0 4px 20px rgba(16,185,129,0.35)',
               }}
             >
-              {generating ? 'Generating...' : 'Generate My Plan'}
+              Create Workout Plan →
             </button>
           </div>
         )}
       </motion.div>
 
-      {/* F. Macros Card */}
-      {mealContent && (() => {
+      {/* F. Macros Card - only when meal plan exists */}
+      {mealContent ? (() => {
         const parseTarget = (v) => parseInt(String(v || '').replace(/[^\d]/g, ''), 10) || 0
         const targetCal = parseTarget(mealContent.dailyCalories) || 2000
         const targetP = parseTarget(mealContent.protein) || 150
@@ -472,7 +432,36 @@ export default function Dashboard() {
             })}
           </motion.div>
         )
-      })()}
+      })() : (
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: cardDelays[4] }}
+          className="glass"
+          style={{ padding: 24, marginBottom: 14, textAlign: 'center', border: '1px dashed rgba(249,115,22,0.2)' }}
+        >
+          <div style={{ fontSize: 28, marginBottom: 12 }}>🥗</div>
+          <div style={{ fontSize: 16, fontWeight: 700, color: '#fff', marginBottom: 8 }}>No Meal Plan Yet</div>
+          <div style={{ fontSize: 13, color: '#2D5B3F', marginBottom: 16 }}>Create your personalized meal plan</div>
+          <button
+            onClick={() => router.push('/plans?start=meal')}
+            style={{
+              width: '100%',
+              padding: 16,
+              borderRadius: 14,
+              border: 'none',
+              background: 'linear-gradient(135deg, #F97316, #EC4899)',
+              color: '#fff',
+              fontSize: 15,
+              fontWeight: 700,
+              boxShadow: '0 4px 20px rgba(249,115,22,0.25)',
+            }}
+          >
+            Create Meal Plan →
+          </button>
+        </motion.div>
+      )}
+
 
       {/* G. Nutrition Summary */}
       {mealContent && (

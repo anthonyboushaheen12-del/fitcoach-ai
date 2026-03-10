@@ -1,8 +1,8 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
-import { motion } from 'framer-motion'
+import { useRouter, useSearchParams } from 'next/navigation'
+import { motion, AnimatePresence } from 'framer-motion'
 import { supabase } from '../../lib/supabase'
 import { getTrainer } from '../../lib/trainers'
 import { useAuth } from '../components/AuthProvider'
@@ -12,14 +12,156 @@ import WorkoutMuscleMap from '../components/WorkoutMuscleMap'
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const MEAL_EMOJIS = ['🍳', '🥗', '🍌', '🥩']
 
+const WORKOUT_STEPS = [
+  {
+    id: 'experience',
+    q: "What's your training experience?",
+    options: [
+      { value: 'beginner', label: 'Beginner — Less than 6 months', emoji: '🟢' },
+      { value: 'intermediate', label: 'Intermediate — 6 months to 2 years', emoji: '🟡' },
+      { value: 'advanced', label: 'Advanced — 2+ years', emoji: '🔴' },
+    ],
+    multi: false,
+  },
+  {
+    id: 'daysPerWeek',
+    q: 'How many days per week can you train?',
+    options: [
+      { value: 3, label: '3 days' },
+      { value: 4, label: '4 days' },
+      { value: 5, label: '5 days' },
+      { value: 6, label: '6 days' },
+    ],
+    multi: false,
+  },
+  {
+    id: 'focus',
+    q: 'What do you want to focus on?',
+    options: [
+      { value: 'overall_muscle', label: 'Overall Muscle Building', emoji: '💪' },
+      { value: 'legs_glutes', label: 'Legs & Glutes', emoji: '🦵' },
+      { value: 'upper_body', label: 'Upper Body (Chest, Back, Shoulders)', emoji: '🏋️' },
+      { value: 'arms', label: 'Arms (Biceps, Triceps)', emoji: '💪' },
+      { value: 'core', label: 'Core & Abs', emoji: '🔥' },
+      { value: 'athletic', label: 'Athletic Performance', emoji: '⚡' },
+      { value: 'cardio', label: 'Cardio & Endurance', emoji: '🏃' },
+    ],
+    multi: true,
+  },
+  {
+    id: 'equipment',
+    q: 'What equipment do you have access to?',
+    options: [
+      { value: 'full_gym', label: 'Full Gym (all equipment)', emoji: '🏢' },
+      { value: 'home_gym', label: 'Home Gym (dumbbells, bench, pull-up bar)', emoji: '🏠' },
+      { value: 'barbell_only', label: 'Barbell & Rack Only', emoji: '🏋️' },
+      { value: 'dumbbells_only', label: 'Dumbbells Only', emoji: '💪' },
+      { value: 'bodyweight', label: 'Bodyweight Only', emoji: '🤸' },
+    ],
+    multi: true,
+  },
+  {
+    id: 'sessionDuration',
+    q: 'How long are your workout sessions?',
+    options: [
+      { value: '30-45', label: '30-45 minutes (quick)', emoji: '⚡' },
+      { value: '45-60', label: '45-60 minutes (standard)', emoji: '💪' },
+      { value: '60-90', label: '60-90 minutes (thorough)', emoji: '🔥' },
+    ],
+    multi: false,
+  },
+  {
+    id: 'injuries',
+    q: 'Any injuries or limitations?',
+    optional: true,
+    textarea: true,
+  },
+]
+
+const MEAL_STEPS = [
+  {
+    id: 'diet',
+    q: 'Any dietary preferences?',
+    options: [
+      { value: 'no_restrictions', label: 'No restrictions', emoji: '🥩' },
+      { value: 'vegetarian', label: 'Vegetarian', emoji: '🌿' },
+      { value: 'vegan', label: 'Vegan', emoji: '🌱' },
+      { value: 'pescatarian', label: 'Pescatarian', emoji: '🐟' },
+      { value: 'keto', label: 'Keto / Low Carb', emoji: '🥓' },
+      { value: 'halal', label: 'Halal', emoji: '🕌' },
+      { value: 'kosher', label: 'Kosher', emoji: '✡️' },
+    ],
+    multi: false,
+  },
+  {
+    id: 'mealsPerDay',
+    q: 'How many meals do you prefer per day?',
+    options: [
+      { value: 3, label: '3 meals' },
+      { value: 4, label: '4 meals (3 + 1 snack)' },
+      { value: 5, label: '5 meals (3 + 2 snacks)' },
+      { value: 6, label: '6 meals (serious bulking)' },
+    ],
+    multi: false,
+  },
+  {
+    id: 'cookingAbility',
+    q: 'How much time can you spend cooking?',
+    options: [
+      { value: 'minimal', label: 'Minimal — Quick meals (under 15 min)', emoji: '⚡' },
+      { value: 'moderate', label: 'Moderate — Basic meals (15-30 min)', emoji: '🍳' },
+      { value: 'advanced', label: 'Advanced — Detailed recipes (30+ min)', emoji: '👨‍🍳' },
+    ],
+    multi: false,
+  },
+  {
+    id: 'allergies',
+    q: 'Any allergies or foods you hate?',
+    optional: true,
+    textarea: true,
+  },
+  {
+    id: 'budget',
+    q: "What's your food budget like?",
+    options: [
+      { value: 'budget', label: 'Budget-friendly', emoji: '💰' },
+      { value: 'moderate', label: 'Moderate', emoji: '💎' },
+      { value: 'premium', label: 'No limit', emoji: '👑' },
+    ],
+    multi: false,
+  },
+]
+
+const inputStyle = {
+  width: '100%',
+  padding: '14px 16px',
+  background: 'rgba(14,20,14,0.55)',
+  backdropFilter: 'blur(24px)',
+  border: '1px solid rgba(110,231,183,0.07)',
+  borderRadius: 14,
+  color: '#E2FBE8',
+  fontSize: 15,
+  fontFamily: "'Outfit', sans-serif",
+  fontWeight: 500,
+}
+
 export default function Plans() {
   const router = useRouter()
-  const { user, profile } = useAuth()
+  const searchParams = useSearchParams()
+  const { user, profile, refreshProfile } = useAuth()
   const [plans, setPlans] = useState([])
   const [loading, setLoading] = useState(true)
-  const [view, setView] = useState('today')
+  const [view, setView] = useState('overview')
+  const [subView, setSubView] = useState('today')
   const [expandedDay, setExpandedDay] = useState(null)
   const [checkedExercises, setCheckedExercises] = useState({})
+  const [workoutQuizStep, setWorkoutQuizStep] = useState(0)
+  const [mealQuizStep, setMealQuizStep] = useState(0)
+  const [workoutPrefs, setWorkoutPrefs] = useState({})
+  const [mealPrefs, setMealPrefs] = useState({})
+  const [generating, setGenerating] = useState(false)
+  const [genError, setGenError] = useState(null)
+  const [direction, setDirection] = useState(1)
 
   useEffect(() => {
     if (!user) { router.push('/'); return }
@@ -27,9 +169,20 @@ export default function Plans() {
   }, [user, profile, router])
 
   useEffect(() => {
+    const start = searchParams.get('start')
+    if (start === 'workout') setView('workout-quiz')
+    if (start === 'meal') setView('meal-quiz')
+  }, [searchParams])
+
+  useEffect(() => {
     if (!profile?.id) return
     loadPlans(profile.id)
   }, [profile?.id])
+
+  useEffect(() => {
+    if (profile?.preferences?.workout) setWorkoutPrefs(profile.preferences.workout)
+    if (profile?.preferences?.meal) setMealPrefs(profile.preferences.meal)
+  }, [profile?.preferences])
 
   async function loadPlans(profileId) {
     const { data } = await supabase
@@ -37,20 +190,93 @@ export default function Plans() {
       .select('*')
       .eq('profile_id', profileId)
       .order('created_at', { ascending: false })
-
     setPlans(data || [])
     setLoading(false)
   }
 
   function toggleExercise(dayIdx, exIdx) {
-    const key = `${dayIdx}-${exIdx}`
-    setCheckedExercises((prev) => ({ ...prev, [key]: !prev[key] }))
+    setCheckedExercises((prev) => ({ ...prev, [`${dayIdx}-${exIdx}`]: !prev[`${dayIdx}-${exIdx}`] }))
+  }
+
+  const updateWorkoutPref = (key, value) => {
+    setWorkoutPrefs((p) => ({ ...p, [key]: value }))
+  }
+  const updateMealPref = (key, value) => {
+    setMealPrefs((p) => ({ ...p, [key]: value }))
+  }
+
+  const toggleMulti = (key, value, isWorkout) => {
+    const setter = isWorkout ? updateWorkoutPref : updateMealPref
+    const prefs = isWorkout ? workoutPrefs : mealPrefs
+    const arr = Array.isArray(prefs[key]) ? prefs[key] : []
+    const next = arr.includes(value) ? arr.filter((v) => v !== value) : [...arr, value]
+    setter(key, next)
+  }
+
+  async function generateWorkoutPlan() {
+    if (!profile) return
+    setGenerating(true)
+    setGenError(null)
+    try {
+      const res = await fetch('/api/generate-plan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          profileId: profile.id,
+          profile,
+          trainerId: profile.trainer,
+          onboardingContext: profile?.onboarding_context,
+          type: 'workout',
+          workoutPreferences: workoutPrefs,
+        }),
+      })
+      const data = await res.json()
+      if (data.success) {
+        await loadPlans(profile.id)
+        await refreshProfile()
+        setView('overview')
+        setWorkoutQuizStep(0)
+      } else throw new Error(data.error || 'Failed')
+    } catch (err) {
+      setGenError(err?.message || 'Failed to generate plan')
+    } finally {
+      setGenerating(false)
+    }
+  }
+
+  async function generateMealPlan() {
+    if (!profile) return
+    setGenerating(true)
+    setGenError(null)
+    try {
+      const res = await fetch('/api/generate-plan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          profileId: profile.id,
+          profile,
+          trainerId: profile.trainer,
+          onboardingContext: profile?.onboarding_context,
+          type: 'meal',
+          mealPreferences: mealPrefs,
+        }),
+      })
+      const data = await res.json()
+      if (data.success) {
+        await loadPlans(profile.id)
+        await refreshProfile()
+        setView('overview')
+        setMealQuizStep(0)
+      } else throw new Error(data.error || 'Failed')
+    } catch (err) {
+      setGenError(err?.message || 'Failed to generate plan')
+    } finally {
+      setGenerating(false)
+    }
   }
 
   if (loading || !profile) {
-    return (
-      <div style={{ padding: 40, textAlign: 'center', color: '#2D5B3F' }}>Loading plans...</div>
-    )
+    return <div style={{ padding: 40, textAlign: 'center', color: '#2D5B3F' }}>Loading plans...</div>
   }
 
   const trainer = getTrainer(profile.trainer)
@@ -70,13 +296,291 @@ export default function Plans() {
   }
   const todayWorkout = workoutDays[todayDayIndex] || workoutDays[0]
   const todayExercises = todayWorkout?.exercises || activeWorkout?.content?.todayExercises || []
-
-  const getCheckedCount = (exercises, dayIdx) => {
-    return exercises?.filter((_, exIdx) => checkedExercises[`${dayIdx}-${exIdx}`]).length || 0
-  }
+  const getCheckedCount = (exercises, dayIdx) =>
+    exercises?.filter((_, exIdx) => checkedExercises[`${dayIdx}-${exIdx}`]).length || 0
   const todayChecked = getCheckedCount(todayExercises, todayDayIndex)
   const todayTotal = todayExercises.length
   const allComplete = todayTotal > 0 && todayChecked === todayTotal
+
+  const optionBtn = (field, value, label, emoji, selected, onClick, multi) => (
+    <motion.button
+      key={value}
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      onClick={onClick}
+      style={{
+        padding: '14px 16px',
+        background: selected ? 'linear-gradient(135deg, rgba(110,231,183,0.12), rgba(16,185,129,0.06))' : 'rgba(14,20,14,0.55)',
+        border: selected ? '2px solid rgba(110,231,183,0.3)' : '1px solid rgba(110,231,183,0.07)',
+        borderRadius: 14,
+        color: selected ? '#6EE7B7' : '#2D5B3F',
+        fontSize: 14,
+        fontWeight: 600,
+        textAlign: 'left',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 10,
+        backdropFilter: 'blur(24px)',
+      }}
+    >
+      {emoji && <span style={{ fontSize: 20 }}>{emoji}</span>}
+      {label}
+    </motion.button>
+  )
+
+  if (view === 'workout-quiz') {
+    const steps = WORKOUT_STEPS
+    const step = steps[workoutQuizStep]
+    const isLast = workoutQuizStep === steps.length - 1
+    const isFirst = workoutQuizStep === 0
+    const canNext = step.textarea
+      ? true
+      : step.multi
+        ? (workoutPrefs[step.id]?.length || 0) > 0
+        : workoutPrefs[step.id] != null && workoutPrefs[step.id] !== ''
+
+    return (
+      <div style={{ padding: '18px 20px 0' }}>
+        <div style={{ marginBottom: 20 }}>
+          <button
+            onClick={() => isFirst ? setView('overview') : setWorkoutQuizStep(workoutQuizStep - 1)}
+            style={{ background: 'none', border: 'none', color: '#6EE7B7', fontSize: 14, fontWeight: 600 }}
+          >
+            ← Back
+          </button>
+          <h1 style={{ fontSize: 22, fontWeight: 800, color: '#fff', marginTop: 8 }}>Workout Plan</h1>
+        </div>
+        <div style={{ display: 'flex', gap: 6, marginBottom: 24 }}>
+          {steps.map((_, i) => (
+            <div key={i} style={{ flex: 1, height: 4, borderRadius: 100, background: 'rgba(110,231,183,0.08)', overflow: 'hidden' }}>
+              <motion.div
+                animate={{ width: i <= workoutQuizStep ? '100%' : 0 }}
+                transition={{ duration: 0.3 }}
+                style={{ height: '100%', background: 'linear-gradient(90deg, #10B981, #6EE7B7)', borderRadius: 100 }}
+              />
+            </div>
+          ))}
+        </div>
+        <AnimatePresence mode="wait">
+          {step.textarea ? (
+            <motion.div key={step.id} initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
+              <h2 style={{ fontSize: 18, fontWeight: 700, color: '#fff', marginBottom: 8 }}>{step.q}</h2>
+              <textarea
+                placeholder="e.g. Bad left shoulder, lower back issues... Leave blank if none"
+                value={workoutPrefs[step.id] || ''}
+                onChange={(e) => updateWorkoutPref(step.id, e.target.value)}
+                rows={4}
+                style={{ ...inputStyle, resize: 'vertical', minHeight: 100, marginBottom: 12 }}
+              />
+              <div style={{ display: 'flex', gap: 10 }}>
+                <button
+                  onClick={() => updateWorkoutPref(step.id, '')}
+                  style={{ padding: '10px 16px', borderRadius: 12, border: '1px solid rgba(110,231,183,0.2)', background: 'transparent', color: '#2D5B3F', fontSize: 13 }}
+                >
+                  No limitations
+                </button>
+              </div>
+            </motion.div>
+          ) : (
+            <motion.div key={step.id} initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
+              <h2 style={{ fontSize: 18, fontWeight: 700, color: '#fff', marginBottom: 16 }}>{step.q}</h2>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {step.options.map((opt) => (
+                  <div key={opt.value}>
+                    {optionBtn(
+                      step.id,
+                      opt.value,
+                      opt.label,
+                      opt.emoji,
+                      step.multi ? (workoutPrefs[step.id] || []).includes(opt.value) : workoutPrefs[step.id] === opt.value,
+                      () => (step.multi ? toggleMulti(step.id, opt.value, true) : updateWorkoutPref(step.id, opt.value)),
+                      step.multi
+                    )}
+                  </div>
+                ))}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+        {isLast ? (
+          <div style={{ marginTop: 24 }}>
+            <div className="glass" style={{ padding: 16, marginBottom: 16 }}>
+              <div style={{ fontSize: 14, color: '#6EE7B7', marginBottom: 8 }}>{trainer.name} will create your program</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                {Object.entries(workoutPrefs).filter(([k, v]) => v && (Array.isArray(v) ? v.length : true)).map(([k, v]) => (
+                  <span key={k} style={{ padding: '6px 12px', borderRadius: 20, background: 'rgba(110,231,183,0.15)', fontSize: 12, color: '#6EE7B7' }}>
+                    {Array.isArray(v) ? v.join(', ') : v}
+                  </span>
+                ))}
+              </div>
+            </div>
+            {genError && <div style={{ color: '#FB7185', fontSize: 13, marginBottom: 12 }}>{genError}</div>}
+            <button
+              onClick={generateWorkoutPlan}
+              disabled={generating}
+              style={{
+                width: '100%',
+                padding: 16,
+                borderRadius: 14,
+                border: 'none',
+                background: 'linear-gradient(135deg, #10B981, #6EE7B7)',
+                color: '#070B07',
+                fontSize: 15,
+                fontWeight: 700,
+                opacity: generating ? 0.6 : 1,
+              }}
+            >
+              {generating ? `${trainer.emoji} Building your workout...` : 'Generate My Workout Plan'}
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={() => setWorkoutQuizStep(workoutQuizStep + 1)}
+            disabled={!canNext}
+            style={{
+              width: '100%',
+              marginTop: 24,
+              padding: 16,
+              borderRadius: 14,
+              border: 'none',
+              background: canNext ? 'linear-gradient(135deg, #10B981, #6EE7B7)' : 'rgba(110,231,183,0.2)',
+              color: canNext ? '#070B07' : '#2D5B3F',
+              fontSize: 15,
+              fontWeight: 700,
+            }}
+          >
+            Continue →
+          </button>
+        )}
+      </div>
+    )
+  }
+
+  if (view === 'meal-quiz') {
+    const steps = MEAL_STEPS
+    const step = steps[mealQuizStep]
+    const isLast = mealQuizStep === steps.length - 1
+    const isFirst = mealQuizStep === 0
+    const canNext = step.textarea
+      ? true
+      : step.multi
+        ? (mealPrefs[step.id]?.length || 0) > 0
+        : mealPrefs[step.id] != null && mealPrefs[step.id] !== ''
+
+    return (
+      <div style={{ padding: '18px 20px 0' }}>
+        <div style={{ marginBottom: 20 }}>
+          <button
+            onClick={() => isFirst ? setView('overview') : setMealQuizStep(mealQuizStep - 1)}
+            style={{ background: 'none', border: 'none', color: '#6EE7B7', fontSize: 14, fontWeight: 600 }}
+          >
+            ← Back
+          </button>
+          <h1 style={{ fontSize: 22, fontWeight: 800, color: '#fff', marginTop: 8 }}>Meal Plan</h1>
+        </div>
+        <div style={{ display: 'flex', gap: 6, marginBottom: 24 }}>
+          {steps.map((_, i) => (
+            <div key={i} style={{ flex: 1, height: 4, borderRadius: 100, background: 'rgba(249,115,22,0.15)', overflow: 'hidden' }}>
+              <motion.div
+                animate={{ width: i <= mealQuizStep ? '100%' : 0 }}
+                transition={{ duration: 0.3 }}
+                style={{ height: '100%', background: 'linear-gradient(90deg, #F97316, #EC4899)', borderRadius: 100 }}
+              />
+            </div>
+          ))}
+        </div>
+        <AnimatePresence mode="wait">
+          {step.textarea ? (
+            <motion.div key={step.id} initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
+              <h2 style={{ fontSize: 18, fontWeight: 700, color: '#fff', marginBottom: 8 }}>{step.q}</h2>
+              <textarea
+                placeholder="e.g. Lactose intolerant, hate broccoli... Leave blank if none"
+                value={mealPrefs[step.id] || ''}
+                onChange={(e) => updateMealPref(step.id, e.target.value)}
+                rows={4}
+                style={{ ...inputStyle, resize: 'vertical', minHeight: 100, marginBottom: 12 }}
+              />
+              <button
+                onClick={() => updateMealPref(step.id, '')}
+                style={{ padding: '10px 16px', borderRadius: 12, border: '1px solid rgba(249,115,22,0.3)', background: 'transparent', color: '#2D5B3F', fontSize: 13 }}
+              >
+                No allergies
+              </button>
+            </motion.div>
+          ) : (
+            <motion.div key={step.id} initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
+              <h2 style={{ fontSize: 18, fontWeight: 700, color: '#fff', marginBottom: 16 }}>{step.q}</h2>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {step.options.map((opt) => (
+                  <div key={opt.value}>
+                    {optionBtn(
+                      step.id,
+                      opt.value,
+                      opt.label,
+                      opt.emoji,
+                      step.multi ? (mealPrefs[step.id] || []).includes(opt.value) : mealPrefs[step.id] === opt.value,
+                      () => (step.multi ? toggleMulti(step.id, opt.value, false) : updateMealPref(step.id, opt.value)),
+                      step.multi
+                    )}
+                  </div>
+                ))}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+        {isLast ? (
+          <div style={{ marginTop: 24 }}>
+            <div className="glass" style={{ padding: 16, marginBottom: 16 }}>
+              <div style={{ fontSize: 14, color: '#F97316', marginBottom: 8 }}>{trainer.name} will design your nutrition</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                {Object.entries(mealPrefs).filter(([k, v]) => v && (Array.isArray(v) ? v.length : true)).map(([k, v]) => (
+                  <span key={k} style={{ padding: '6px 12px', borderRadius: 20, background: 'rgba(249,115,22,0.15)', fontSize: 12, color: '#FB923C' }}>
+                    {Array.isArray(v) ? v.join(', ') : v}
+                  </span>
+                ))}
+              </div>
+            </div>
+            {genError && <div style={{ color: '#FB7185', fontSize: 13, marginBottom: 12 }}>{genError}</div>}
+            <button
+              onClick={generateMealPlan}
+              disabled={generating}
+              style={{
+                width: '100%',
+                padding: 16,
+                borderRadius: 14,
+                border: 'none',
+                background: 'linear-gradient(135deg, #F97316, #EC4899)',
+                color: '#fff',
+                fontSize: 15,
+                fontWeight: 700,
+                opacity: generating ? 0.6 : 1,
+              }}
+            >
+              {generating ? `${trainer.emoji} Designing your nutrition...` : 'Generate My Meal Plan'}
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={() => setMealQuizStep(mealQuizStep + 1)}
+            disabled={!canNext}
+            style={{
+              width: '100%',
+              marginTop: 24,
+              padding: 16,
+              borderRadius: 14,
+              border: 'none',
+              background: canNext ? 'linear-gradient(135deg, #F97316, #EC4899)' : 'rgba(249,115,22,0.2)',
+              color: canNext ? '#fff' : '#2D5B3F',
+              fontSize: 15,
+              fontWeight: 700,
+            }}
+          >
+            Continue →
+          </button>
+        )}
+      </div>
+    )
+  }
 
   return (
     <div style={{ padding: '18px 20px 0' }}>
@@ -86,217 +590,183 @@ export default function Plans() {
           <span style={{ color: '#fff' }}>Coach</span>
           <span className="gradient-accent" style={{ fontSize: 13, fontWeight: 600, marginLeft: 6 }}>AI</span>
         </h1>
-        <p style={{ fontSize: 12, color: '#2D5B3F', fontWeight: 500, marginTop: 3 }}>Your active programs</p>
+        <p style={{ fontSize: 12, color: '#2D5B3F', fontWeight: 500, marginTop: 3 }}>Your plans</p>
       </div>
 
-      {activeWorkout && (
-        <>
-          <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
-            {['today', 'week'].map((v) => (
-              <button
-                key={v}
-                onClick={() => setView(v)}
-                style={{
-                  flex: 1,
-                  padding: 12,
-                  borderRadius: 12,
-                  border: view === v ? '2px solid rgba(110,231,183,0.4)' : '1px solid rgba(110,231,183,0.1)',
-                  background: view === v ? 'rgba(110,231,183,0.1)' : 'transparent',
-                  color: view === v ? '#6EE7B7' : '#2D5B3F',
-                  fontSize: 14,
-                  fontWeight: 600,
-                }}
-              >
-                {v === 'today' ? 'Today' : 'Full Week'}
-              </button>
-            ))}
+      {activeWorkout ? (
+        <div style={{ marginBottom: 20 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+            <span style={{ fontSize: 14, color: '#6EE7B7', fontWeight: 600 }}>Workout</span>
+            <button
+              onClick={() => setView('workout-quiz')}
+              style={{ padding: '6px 12px', borderRadius: 10, border: '1px solid rgba(110,231,183,0.3)', background: 'transparent', color: '#6EE7B7', fontSize: 12, fontWeight: 600 }}
+            >
+              Regenerate Workout
+            </button>
           </div>
-
-          {view === 'today' ? (
-            <div className="glass" style={{ padding: 0, marginBottom: 14, overflow: 'hidden' }}>
-              <div style={{ height: 3, background: 'linear-gradient(90deg, #10B981, #6EE7B7)' }} />
-              <div style={{ padding: 20 }}>
-                <div style={{ fontSize: 16, fontWeight: 700, color: '#fff', marginBottom: 4 }}>
-                  {todayWorkout?.name || activeWorkout.content?.todayName || "Today's Workout"}
-                </div>
-                <div style={{ fontSize: 12, color: '#2D5B3F', marginBottom: 12 }}>
-                  {todayExercises.length} exercises · Rest between sets as indicated
-                </div>
-                <div style={{ height: 6, borderRadius: 100, background: 'rgba(110,231,183,0.15)', marginBottom: 16, overflow: 'hidden' }}>
-                  <motion.div
+          <div className="glass" style={{ padding: 0, overflow: 'hidden', border: '1px solid rgba(110,231,183,0.07)' }}>
+            <div style={{ height: 3, background: 'linear-gradient(90deg, #10B981, #6EE7B7)' }} />
+            <div style={{ padding: 20 }}>
+              <div style={{ fontSize: 16, fontWeight: 700, color: '#fff', marginBottom: 4 }}>
+                {activeWorkout.content?.name || "Workout Plan"}
+              </div>
+              <div style={{ fontSize: 12, color: '#2D5B3F', marginBottom: 16 }}>
+                {activeWorkout.content?.daysPerWeek || 4} days/week
+              </div>
+              <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+                {['today', 'week'].map((v) => (
+                  <button
+                    key={v}
+                    onClick={() => setSubView(v)}
                     style={{
-                      height: '100%',
-                      width: `${(todayChecked / Math.max(todayTotal, 1)) * 100}%`,
-                      background: 'linear-gradient(90deg, #10B981, #6EE7B7)',
-                      borderRadius: 100,
-                    }}
-                    transition={{ duration: 0.3 }}
-                  />
-                </div>
-                {allComplete && (
-                  <motion.div
-                    initial={{ scale: 0.8, opacity: 0 }}
-                    animate={{ scale: 1, opacity: 1 }}
-                    style={{
-                      padding: 16,
-                      background: 'rgba(110,231,183,0.1)',
-                      borderRadius: 14,
-                      textAlign: 'center',
-                      marginBottom: 16,
-                      border: '1px solid rgba(110,231,183,0.2)',
+                      flex: 1,
+                      padding: 12,
+                      borderRadius: 12,
+                      border: subView === v ? '2px solid rgba(110,231,183,0.4)' : '1px solid rgba(110,231,183,0.1)',
+                      background: subView === v ? 'rgba(110,231,183,0.1)' : 'transparent',
+                      color: subView === v ? '#6EE7B7' : '#2D5B3F',
+                      fontSize: 14,
+                      fontWeight: 600,
                     }}
                   >
-                    <span style={{ fontSize: 24 }}>🎉</span>
-                    <div style={{ fontSize: 16, fontWeight: 700, color: '#6EE7B7', marginTop: 4 }}>Workout Complete!</div>
-                  </motion.div>
-                )}
-                {todayExercises.map((ex, i) => (
-                  <motion.div key={i} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.03 }}>
-                    <ExerciseRow
-                      name={ex.name}
-                      sets={ex.sets}
-                      rest={ex.rest || '60s'}
-                      showCheckbox
-                      onToggle={() => toggleExercise(todayDayIndex, i)}
-                      isChecked={checkedExercises[`${todayDayIndex}-${i}`]}
-                      isLast={i >= todayExercises.length - 1}
-                    />
-                  </motion.div>
+                    {v === 'today' ? 'Today' : 'Full Week'}
+                  </button>
                 ))}
               </div>
-            </div>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 14 }}>
-              {workoutDays.map((day, dayIdx) => {
-                const isExpanded = expandedDay === dayIdx
-                const isToday = dayIdx === todayDayIndex
-                const exs = day.exercises || []
-                const checked = getCheckedCount(exs, dayIdx)
-                const total = exs.length
-                const complete = total > 0 && checked === total
-
-                return (
-                  <motion.div
-                    key={dayIdx}
-                    initial={{ opacity: 0, y: 8 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: dayIdx * 0.05 }}
-                    className="glass"
-                    style={{
-                      padding: 0,
-                      overflow: 'hidden',
-                      border: isToday ? '2px solid rgba(110,231,183,0.35)' : '1px solid rgba(110,231,183,0.07)',
-                      boxShadow: isToday ? '0 0 20px rgba(110,231,183,0.15)' : 'none',
-                    }}
-                  >
-                    <button
-                      onClick={() => setExpandedDay(isExpanded ? null : dayIdx)}
-                      style={{
-                        width: '100%',
-                        padding: 16,
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'center',
-                        background: 'none',
-                        border: 'none',
-                        cursor: 'pointer',
-                        textAlign: 'left',
-                      }}
-                    >
-                      <div>
-                        <div style={{ fontSize: 15, fontWeight: 700, color: '#fff' }}>{day.name}</div>
-                        <div style={{ fontSize: 11, color: '#2D5B3F', marginTop: 2 }}>
-                          {exs.length} exercises
-                          {complete && <span style={{ color: '#6EE7B7', marginLeft: 8 }}>✓ Done</span>}
-                        </div>
-                      </div>
-                      <div style={{ fontSize: 18, color: '#6EE7B7' }}>{isExpanded ? '−' : '+'}</div>
-                    </button>
-                    {isExpanded && (
-                      <div style={{ padding: '0 16px 16px', borderTop: '1px solid rgba(110,231,183,0.06)' }}>
-                        <div style={{ marginBottom: 12 }}>
-                          <WorkoutMuscleMap
-                            exerciseNames={(day.exercises || []).map((e) => e.name)}
-                            view="both"
-                            size="small"
-                          />
-                        </div>
-                        <div style={{ height: 4, borderRadius: 100, background: 'rgba(110,231,183,0.1)', marginBottom: 12, overflow: 'hidden' }}>
-                          <div style={{ height: '100%', width: `${(checked / Math.max(total, 1)) * 100}%`, background: 'linear-gradient(90deg, #10B981, #6EE7B7)', borderRadius: 100 }} />
-                        </div>
-                        {exs.map((ex, exIdx) => (
-                          <ExerciseRow
-                            key={exIdx}
-                            name={ex.name}
-                            sets={ex.sets}
-                            rest={ex.rest || '60s'}
-                            showCheckbox
-                            onToggle={() => toggleExercise(dayIdx, exIdx)}
-                            isChecked={checkedExercises[`${dayIdx}-${exIdx}`]}
-                            isLast={exIdx >= exs.length - 1}
-                          />
-                        ))}
-                      </div>
-                    )}
-                  </motion.div>
-                )
-              })}
-            </div>
-          )}
-        </>
-      )}
-
-      {!activeWorkout && (
-        <div className="glass" style={{ padding: 24, textAlign: 'center', marginBottom: 14 }}>
-          <div style={{ fontSize: 32, marginBottom: 8 }}>🏋️</div>
-          <div style={{ color: '#2D5B3F', fontSize: 14 }}>No workout plan yet</div>
-          <button onClick={() => router.push('/dashboard')} style={{ marginTop: 12, padding: '10px 20px', borderRadius: 12, border: '1px solid rgba(110,231,183,0.2)', background: 'rgba(110,231,183,0.08)', color: '#6EE7B7', fontSize: 13, fontWeight: 600 }}>Go to Dashboard</button>
-        </div>
-      )}
-
-      {activeMeal && (
-        <div className="glass" style={{ padding: 0, marginBottom: 14, overflow: 'hidden' }}>
-          <div style={{ height: 3, background: 'linear-gradient(90deg, #F97316, #FBBF24)' }} />
-          <div style={{ padding: 20 }}>
-            <div style={{ fontSize: 16, fontWeight: 700, color: '#fff', marginBottom: 4 }}>
-              🥗 {activeMeal.content?.name || 'Meal Plan'}
-            </div>
-            <div style={{ fontSize: 12, color: '#2D5B3F', marginBottom: 12 }}>
-              {activeMeal.content?.dailyCalories} · {activeMeal.content?.protein} protein
-            </div>
-            {activeMeal.content?.meals && activeMeal.content.meals.map((meal, i) => (
-              <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 0', borderTop: '1px solid rgba(110,231,183,0.04)' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <span style={{ fontSize: 20 }}>{MEAL_EMOJIS[i] || '🍽️'}</span>
-                  <div>
-                    <div style={{ fontSize: 13, fontWeight: 600, color: '#D1FAE5' }}>{meal.name}</div>
-                    <div style={{ fontSize: 11, color: '#1F4030' }}>{meal.description}</div>
+              {subView === 'today' ? (
+                <>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: '#D1FAE5', marginBottom: 8 }}>{todayWorkout?.name || activeWorkout.content?.todayName}</div>
+                  <div style={{ height: 6, borderRadius: 100, background: 'rgba(110,231,183,0.15)', marginBottom: 12, overflow: 'hidden' }}>
+                    <motion.div style={{ height: '100%', width: `${(todayChecked / Math.max(todayTotal, 1)) * 100}%`, background: 'linear-gradient(90deg, #10B981, #6EE7B7)', borderRadius: 100 }} transition={{ duration: 0.3 }} />
                   </div>
+                  {allComplete && <div style={{ padding: 12, background: 'rgba(110,231,183,0.1)', borderRadius: 12, textAlign: 'center', marginBottom: 12, color: '#6EE7B7' }}>🎉 Workout Complete!</div>}
+                  {todayExercises.map((ex, i) => (
+                    <ExerciseRow key={i} name={ex.name} sets={ex.sets} rest={ex.rest || '60s'} showCheckbox onToggle={() => toggleExercise(todayDayIndex, i)} isChecked={checkedExercises[`${todayDayIndex}-${i}`]} isLast={i >= todayExercises.length - 1} />
+                  ))}
+                </>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {workoutDays.map((day, dayIdx) => {
+                    const isExpanded = expandedDay === dayIdx
+                    const exs = day.exercises || []
+                    const checked = getCheckedCount(exs, dayIdx)
+                    const total = exs.length
+                    return (
+                      <div key={dayIdx} className="glass-sm" style={{ padding: 0 }}>
+                        <button onClick={() => setExpandedDay(isExpanded ? null : dayIdx)} style={{ width: '100%', padding: 14, display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left' }}>
+                          <div>
+                            <div style={{ fontSize: 14, fontWeight: 700, color: '#fff' }}>{day.name}</div>
+                            <div style={{ fontSize: 11, color: '#2D5B3F' }}>{exs.length} exercises {checked === total && total > 0 && '✓'}</div>
+                          </div>
+                          <span style={{ color: '#6EE7B7' }}>{isExpanded ? '−' : '+'}</span>
+                        </button>
+                        {isExpanded && (
+                          <div style={{ padding: '0 14px 14px', borderTop: '1px solid rgba(110,231,183,0.06)' }}>
+                            <WorkoutMuscleMap exerciseNames={exs.map((e) => e.name)} view="both" size="small" />
+                            {exs.map((ex, exIdx) => (
+                              <ExerciseRow key={exIdx} name={ex.name} sets={ex.sets} rest={ex.rest || '60s'} showCheckbox onToggle={() => toggleExercise(dayIdx, exIdx)} isChecked={checkedExercises[`${dayIdx}-${exIdx}`]} isLast={exIdx >= exs.length - 1} />
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
                 </div>
-                <div style={{ textAlign: 'right' }}>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: '#fff' }}>{meal.calories} cal</div>
-                  <div className="gradient-accent" style={{ fontSize: 10, fontWeight: 600 }}>{meal.protein}g P</div>
-                </div>
-              </div>
-            ))}
+              )}
+            </div>
           </div>
         </div>
-      )}
-
-      {!activeMeal && (
-        <div className="glass" style={{ padding: 24, textAlign: 'center', marginBottom: 14 }}>
-          <div style={{ fontSize: 32, marginBottom: 8 }}>🥗</div>
-          <div style={{ color: '#2D5B3F', fontSize: 14 }}>No meal plan yet</div>
+      ) : (
+        <div className="glass" style={{ padding: 24, marginBottom: 20, textAlign: 'center', border: '1px dashed rgba(110,231,183,0.2)' }}>
+          <div style={{ fontSize: 36, marginBottom: 12 }}>🏋️</div>
+          <div style={{ fontSize: 16, fontWeight: 700, color: '#fff', marginBottom: 8 }}>Create Your Workout Plan</div>
+          <div style={{ fontSize: 13, color: '#2D5B3F', marginBottom: 16 }}>Answer a few questions and your AI trainer will build a personalized program</div>
+          <button
+            onClick={() => setView('workout-quiz')}
+            style={{
+              width: '100%',
+              padding: 16,
+              borderRadius: 14,
+              border: 'none',
+              background: 'linear-gradient(135deg, #10B981, #6EE7B7)',
+              color: '#070B07',
+              fontSize: 15,
+              fontWeight: 700,
+            }}
+          >
+            Start Workout Quiz →
+          </button>
         </div>
       )}
 
-      <button onClick={() => router.push('/dashboard')} style={{
-        width: '100%', padding: 14, borderRadius: 14,
-        border: '1px solid rgba(249,115,22,0.2)',
-        background: 'linear-gradient(135deg, rgba(249,115,22,0.1), rgba(236,72,153,0.05))',
-        color: '#FB923C', fontSize: 13, fontWeight: 700,
-      }}>
-        ↻ Regenerate plans from Dashboard
+      {activeMeal ? (
+        <div style={{ marginBottom: 20 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+            <span style={{ fontSize: 14, color: '#F97316', fontWeight: 600 }}>Meal Plan</span>
+            <button
+              onClick={() => setView('meal-quiz')}
+              style={{ padding: '6px 12px', borderRadius: 10, border: '1px solid rgba(249,115,22,0.3)', background: 'transparent', color: '#FB923C', fontSize: 12, fontWeight: 600 }}
+            >
+              Regenerate Meal Plan
+            </button>
+          </div>
+          <div className="glass" style={{ padding: 0, overflow: 'hidden', border: '1px solid rgba(249,115,22,0.1)' }}>
+            <div style={{ height: 3, background: 'linear-gradient(90deg, #F97316, #FBBF24)' }} />
+            <div style={{ padding: 20 }}>
+              <div style={{ fontSize: 16, fontWeight: 700, color: '#fff', marginBottom: 4 }}>🥗 {activeMeal.content?.name || 'Meal Plan'}</div>
+              <div style={{ fontSize: 12, color: '#2D5B3F', marginBottom: 12 }}>{activeMeal.content?.dailyCalories} · {activeMeal.content?.protein} protein</div>
+              {activeMeal.content?.meals?.map((meal, i) => (
+                <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 0', borderTop: '1px solid rgba(110,231,183,0.04)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <span style={{ fontSize: 20 }}>{MEAL_EMOJIS[i] || '🍽️'}</span>
+                    <div>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: '#D1FAE5' }}>{meal.name}</div>
+                      <div style={{ fontSize: 11, color: '#1F4030' }}>{meal.description}</div>
+                    </div>
+                  </div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: '#fff' }}>{meal.calories} cal</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div className="glass" style={{ padding: 24, textAlign: 'center', border: '1px dashed rgba(249,115,22,0.2)' }}>
+          <div style={{ fontSize: 36, marginBottom: 12 }}>🥗</div>
+          <div style={{ fontSize: 16, fontWeight: 700, color: '#fff', marginBottom: 8 }}>Create Your Meal Plan</div>
+          <div style={{ fontSize: 13, color: '#2D5B3F', marginBottom: 16 }}>Tell us about your preferences and your trainer will design your nutrition</div>
+          <button
+            onClick={() => setView('meal-quiz')}
+            style={{
+              width: '100%',
+              padding: 16,
+              borderRadius: 14,
+              border: 'none',
+              background: 'linear-gradient(135deg, #F97316, #EC4899)',
+              color: '#fff',
+              fontSize: 15,
+              fontWeight: 700,
+            }}
+          >
+            Start Nutrition Quiz →
+          </button>
+        </div>
+      )}
+
+      <button
+        onClick={() => router.push('/dashboard')}
+        style={{
+          width: '100%',
+          padding: 14,
+          borderRadius: 14,
+          border: '1px solid rgba(249,115,22,0.2)',
+          background: 'linear-gradient(135deg, rgba(249,115,22,0.1), rgba(236,72,153,0.05))',
+          color: '#FB923C',
+          fontSize: 13,
+          fontWeight: 700,
+        }}
+      >
+        Back to Dashboard
       </button>
     </div>
   )

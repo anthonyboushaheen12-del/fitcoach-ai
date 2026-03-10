@@ -9,22 +9,12 @@ import { useAuth } from '../components/AuthProvider'
 
 const steps = ['basics', 'body', 'goals', 'trainer']
 
-const TIPS = [
-  'Tip: Progressive overload is the #1 driver of muscle growth',
-  'Tip: Consistency beats intensity — show up, then optimize',
-  'Tip: Sleep and recovery are when your body actually builds muscle',
-  'Tip: Hit your protein target first — 1.6-2.2g per kg bodyweight',
-  'Tip: Track your weight weekly to stay accountable',
-]
-
 export default function OnboardingPage() {
   const router = useRouter()
   const { user, refreshProfile } = useAuth()
   const [step, setStep] = useState(0)
   const [direction, setDirection] = useState(1)
   const [loading, setLoading] = useState(false)
-  const [generatingPlans, setGeneratingPlans] = useState(false)
-  const [tipIndex, setTipIndex] = useState(0)
   const [form, setForm] = useState({
     name: '',
     age: '',
@@ -45,12 +35,6 @@ export default function OnboardingPage() {
       return
     }
   }, [user, router])
-
-  useEffect(() => {
-    if (!generatingPlans) return
-    const t = setInterval(() => setTipIndex((i) => (i + 1) % TIPS.length), 3000)
-    return () => clearInterval(t)
-  }, [generatingPlans])
 
   const goNext = () => {
     if (step < steps.length - 1) {
@@ -132,26 +116,6 @@ export default function OnboardingPage() {
       await refreshProfile()
 
       setLoading(false)
-      setGeneratingPlans(true)
-
-      try {
-        const res = await fetch('/api/generate-plan', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            profileId: data[0].id,
-            profile: fullProfile,
-            trainerId: form.trainer,
-            onboardingContext,
-          }),
-        })
-        const result = await res.json()
-        if (result.success) {
-          await refreshProfile()
-        }
-      } catch (planErr) {
-        console.warn('Plan generation failed, continuing to dashboard:', planErr)
-      }
       router.push('/dashboard')
     } catch (err) {
       console.error('Error creating profile:', err)
@@ -208,43 +172,6 @@ export default function OnboardingPage() {
   )
 
   if (!user) return null
-
-  if (generatingPlans) {
-    const trainer = getTrainer(form.trainer)
-    return (
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        style={{ minHeight: '100vh', padding: '40px 24px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}
-      >
-        <motion.div
-          animate={{ scale: [1, 1.1, 1] }}
-          transition={{ duration: 1.5, repeat: Infinity }}
-          style={{ fontSize: 72, marginBottom: 24 }}
-        >
-          {trainer.emoji}
-        </motion.div>
-        <div style={{ fontSize: 18, fontWeight: 700, color: '#fff', marginBottom: 8, textAlign: 'center' }}>
-          {trainer.name} is building your program...
-        </div>
-        <div style={{ width: '100%', maxWidth: 240, height: 6, borderRadius: 100, background: 'rgba(110,231,183,0.15)', marginBottom: 32, overflow: 'hidden' }}>
-          <motion.div
-            animate={{ width: ['0%', '100%'] }}
-            transition={{ duration: 2, repeat: Infinity, repeatType: 'reverse' }}
-            style={{ height: '100%', background: 'linear-gradient(90deg, #10B981, #6EE7B7)', borderRadius: 100 }}
-          />
-        </div>
-        <motion.p
-          key={tipIndex}
-          initial={{ opacity: 0, y: 4 }}
-          animate={{ opacity: 1, y: 0 }}
-          style={{ fontSize: 13, color: '#2D5B3F', textAlign: 'center', maxWidth: 320 }}
-        >
-          {TIPS[tipIndex]}
-        </motion.p>
-      </motion.div>
-    )
-  }
 
   return (
     <div style={{ minHeight: '100vh', padding: '40px 24px 40px' }}>
