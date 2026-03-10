@@ -9,10 +9,6 @@ export default function SplashScreen({ onComplete }) {
 
   useEffect(() => {
     if (typeof window === 'undefined') return
-    if (sessionStorage.getItem('splashShown')) {
-      onComplete?.()
-      return
-    }
     setVisible(true)
 
     const duration = 2500
@@ -23,7 +19,6 @@ export default function SplashScreen({ onComplete }) {
       setProgress(Math.min((elapsed / 2000) * 100, 100))
       if (elapsed >= duration) {
         clearInterval(timer)
-        sessionStorage.setItem('splashShown', 'true')
         setVisible(false)
         onComplete?.()
       }

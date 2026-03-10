@@ -15,12 +15,18 @@ export default function AuthPage() {
   const [confirmPassword, setConfirmPassword] = useState('')
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [pendingConfirmation, setPendingConfirmation] = useState(null)
+  const [resendSent, setResendSent] = useState(false)
+  const [resending, setResending] = useState(false)
 
   // Redirect if already authenticated
   if (authLoading) {
     return (
-      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#2D5B3F' }}>
-        Loading...
+      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#070B07' }}>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontSize: 32, fontWeight: 800, color: '#6EE7B7' }}>FitCoach<span style={{ color: '#fff' }}>AI</span></div>
+          <div style={{ color: '#2D5B3F', fontSize: 13, marginTop: 8 }}>Loading...</div>
+        </div>
       </div>
     )
   }
@@ -64,6 +70,7 @@ export default function AuthPage() {
   const handleSignUp = async (e) => {
     e.preventDefault()
     setError('')
+    setPendingConfirmation(null)
     if (password.length < 6) {
       setError('Password must be at least 6 characters')
       return
@@ -74,13 +81,33 @@ export default function AuthPage() {
     }
     setSubmitting(true)
     try {
-      const { error: err } = await signUp(email, password)
+      const { data, error: err } = await signUp(email, password)
       if (err) throw err
-      router.replace('/onboarding')
+      if (data?.user && !data?.session) {
+        setPendingConfirmation(email)
+      } else if (data?.user) {
+        router.replace('/onboarding')
+      }
     } catch (err) {
       setError(err?.message || 'Account creation failed')
     } finally {
       setSubmitting(false)
+    }
+  }
+
+  const handleResendConfirmation = async () => {
+    if (!supabase || !pendingConfirmation) return
+    setResending(true)
+    setError('')
+    setResendSent(false)
+    try {
+      const { error: err } = await supabase.auth.resend({ type: 'signup', email: pendingConfirmation })
+      if (err) throw err
+      setResendSent(true)
+    } catch (err) {
+      setError(err?.message || 'Failed to resend')
+    } finally {
+      setResending(false)
     }
   }
 
@@ -205,6 +232,50 @@ export default function AuthPage() {
               {submitting ? 'Signing in...' : 'Sign In'}
             </button>
           </form>
+        ) : pendingConfirmation ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <div style={{ fontSize: 15, color: '#D1FAE5', textAlign: 'center', lineHeight: 1.6 }}>
+              Account created. Check your email for the confirmation link.
+              <br />
+              <span style={{ fontSize: 13, color: '#2D5B3F' }}>{pendingConfirmation}</span>
+            </div>
+            {resendSent && <div style={{ color: '#6EE7B7', fontSize: 13, textAlign: 'center' }}>Verification email sent. Check your inbox.</div>}
+            {error && <div style={{ color: '#FB7185', fontSize: 13 }}>{error}</div>}
+            <button
+              type="button"
+              onClick={handleResendConfirmation}
+              disabled={resending}
+              style={{
+                width: '100%',
+                padding: 14,
+                borderRadius: 14,
+                border: '1px solid rgba(110,231,183,0.3)',
+                background: 'rgba(16,185,129,0.15)',
+                color: '#6EE7B7',
+                fontSize: 14,
+                fontWeight: 600,
+                opacity: resending ? 0.7 : 1,
+              }}
+            >
+              {resending ? 'Sending...' : 'Resend verification email'}
+            </button>
+            <button
+              type="button"
+              onClick={() => { setPendingConfirmation(null); setResendSent(false); setError('') }}
+              style={{
+                width: '100%',
+                padding: 12,
+                borderRadius: 14,
+                border: '1px solid rgba(110,231,183,0.15)',
+                background: 'transparent',
+                color: '#2D5B3F',
+                fontSize: 13,
+                fontWeight: 600,
+              }}
+            >
+              Back to sign up
+            </button>
+          </div>
         ) : (
           <form onSubmit={handleSignUp} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             <div>

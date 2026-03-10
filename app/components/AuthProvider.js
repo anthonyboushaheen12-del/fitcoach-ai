@@ -86,8 +86,7 @@ export function AuthProvider({ children }) {
   const signUp = async (email, password) => {
     if (!supabase) throw new Error('Supabase not configured')
     const { data, error } = await supabase.auth.signUp({ email, password })
-    if (error) throw error
-    return data
+    return { data, error }
   }
 
   const signOut = async () => {
@@ -110,6 +109,34 @@ export function AuthProvider({ children }) {
     }
     return null
   }, [user, fetchProfile])
+
+  if (loading) {
+    return (
+      <AuthContext.Provider value={{ user, profile, loading, signIn, signUp, signOut, refreshProfile, fetchProfile }}>
+        <div style={{
+          minHeight: '100vh',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          background: '#070B07',
+        }}>
+          <div style={{ textAlign: 'center' }}>
+            <div style={{ fontSize: 32, fontWeight: 800, color: '#6EE7B7' }}>
+              Fit<span style={{ color: '#fff' }}>Coach</span>
+              <span style={{
+                fontSize: 14,
+                marginLeft: 6,
+                background: 'linear-gradient(135deg, #F97316, #EC4899)',
+                WebkitBackgroundClip: 'text',
+                WebkitTextFillColor: 'transparent',
+              }}>AI</span>
+            </div>
+            <div style={{ color: '#2D5B3F', fontSize: 13, marginTop: 8 }}>Loading...</div>
+          </div>
+        </div>
+      </AuthContext.Provider>
+    )
+  }
 
   return (
     <AuthContext.Provider

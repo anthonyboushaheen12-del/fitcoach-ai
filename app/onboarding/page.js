@@ -76,18 +76,26 @@ export default function OnboardingPage() {
     setLoading(true)
     try {
       const goalText = String(form.goal || '').trim()
+      const ageVal = form.age ? parseInt(form.age, 10) : null
+      const weightVal = form.weight_kg ? parseFloat(form.weight_kg) : null
+      const heightVal = form.height_cm ? parseFloat(form.height_cm) : null
+
       const insertPayload = {
         user_id: user.id,
-        name: String(form.name || '').trim(),
-        age: parseInt(form.age, 10) || 0,
+        name: String(form.name || '').trim() || 'User',
+        age: Number.isInteger(ageVal) && ageVal > 0 ? ageVal : null,
         gender: String(form.gender || ''),
-        weight_kg: parseFloat(form.weight_kg) || 0,
-        height_cm: parseFloat(form.height_cm) || 0,
+        weight_kg: typeof weightVal === 'number' && !Number.isNaN(weightVal) && weightVal > 0 ? weightVal : null,
+        height_cm: typeof heightVal === 'number' && !Number.isNaN(heightVal) && heightVal > 0 ? heightVal : null,
         activity: String(form.activity || ''),
         goal: goalText || 'General fitness',
         trainer: String(form.trainer || 'bro'),
         units: String(form.units || 'metric'),
-        target_weight: null,
+      }
+      if (insertPayload.weight_kg === null || insertPayload.height_cm === null) {
+        alert('Please enter valid weight and height.')
+        setLoading(false)
+        return
       }
 
       const { data, error } = await supabase
@@ -98,8 +106,12 @@ export default function OnboardingPage() {
       if (error) {
         console.error('Supabase profile insert error:', error)
         console.error('Error message:', error.message)
+        console.error('Error details:', error.details)
+        console.error('Error hint:', error.hint)
         console.error('Insert payload:', JSON.stringify(insertPayload, null, 2))
-        throw error
+        alert('Error: ' + (error.message || 'Failed to create profile'))
+        setLoading(false)
+        return
       }
 
       const onboardingContext = { detailedGoal: goalText }

@@ -9,6 +9,9 @@ import { useAuth } from '../components/AuthProvider'
 import ProgressChart from '../components/ProgressChart'
 import WeightModal from '../components/WeightModal'
 import TrainerModal from '../components/TrainerModal'
+import ExerciseRow from '../components/ExerciseRow'
+import WorkoutMuscleMap from '../components/WorkoutMuscleMap'
+import FoodLogModal from '../components/FoodLogModal'
 
 function getGreeting(name) {
   const h = new Date().getHours()
@@ -27,7 +30,9 @@ export default function Dashboard() {
   const [generating, setGenerating] = useState(false)
   const [weightModalOpen, setWeightModalOpen] = useState(false)
   const [trainerModalOpen, setTrainerModalOpen] = useState(false)
+  const [foodLogModalOpen, setFoodLogModalOpen] = useState(false)
   const [toast, setToast] = useState(null)
+  const [todayMeals, setTodayMeals] = useState([])
 
   const profile = authProfile
   const trainer = profile ? getTrainer(profile.trainer) : getTrainer('bro')
@@ -46,6 +51,15 @@ export default function Dashboard() {
   useEffect(() => {
     if (!profile?.id) return
     loadPlansAndWeightLogs()
+  }, [profile?.id])
+
+  useEffect(() => {
+    if (!profile?.id) return
+    const today = new Date().toISOString().split('T')[0]
+    fetch(`/api/meal-log?profileId=${profile.id}&date=${today}`)
+      .then((r) => r.json())
+      .then((data) => setTodayMeals(data.meals || []))
+      .catch(() => setTodayMeals([]))
   }, [profile?.id])
 
   async function loadPlansAndWeightLogs() {
@@ -150,6 +164,15 @@ export default function Dashboard() {
       }
       return next.sort((a, b) => a.date.localeCompare(b.date))
     })
+  }
+
+  async function handleMealLogged() {
+    const today = new Date().toISOString().split('T')[0]
+    const res = await fetch(`/api/meal-log?profileId=${profile.id}&date=${today}`)
+    const data = await res.json()
+    setTodayMeals(data.meals || [])
+    setToast('Meal logged!')
+    setTimeout(() => setToast(null), 2000)
   }
 
   async function handleSelectTrainer(t) {
@@ -271,7 +294,26 @@ export default function Dashboard() {
         </div>
       </motion.div>
 
-      {/* C. Progress Chart */}
+      {/* C. Muscle Coverage (weekly) */}
+      {workoutContent?.days?.length > 0 && (
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: cardDelays[2] }}
+          className="glass"
+          style={{ padding: 18, marginBottom: 14 }}
+        >
+          <div style={{ fontSize: 14, fontWeight: 700, color: '#fff', marginBottom: 4 }}>Muscle Coverage</div>
+          <div style={{ fontSize: 11, color: '#2D5B3F', marginBottom: 12 }}>This week</div>
+          <WorkoutMuscleMap
+            exerciseNames={(workoutContent.days || []).flatMap((d) => (d.exercises || []).map((e) => e.name))}
+            view="both"
+            size="medium"
+          />
+        </motion.div>
+      )}
+
+      {/* D. Progress Chart */}
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -299,7 +341,7 @@ export default function Dashboard() {
         <ProgressChart data={weightLogs} targetWeight={profile.target_weight} height={160} />
       </motion.div>
 
-      {/* D. Today's Focus */}
+      {/* E. Today's Focus */}
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -308,26 +350,33 @@ export default function Dashboard() {
         {workoutContent && workoutContent.todayExercises ? (
           <div className="glass" style={{ padding: 0, marginBottom: 14, overflow: 'hidden' }}>
             <div style={{ height: 3, background: 'linear-gradient(90deg, #10B981, #F97316, #EC4899)' }} />
-            <div style={{ padding: '18px 20px', borderBottom: '1px solid rgba(110,231,183,0.05)' }}>
-              <div style={{ fontSize: 16, fontWeight: 700, color: '#fff' }}>
-                Today&apos;s Workout
+            <div style={{ padding: '18px 20px', borderBottom: '1px solid rgba(110,231,183,0.05)', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+              <div>
+                <div style={{ fontSize: 16, fontWeight: 700, color: '#fff' }}>
+                  Today&apos;s Workout
+                </div>
+                <div style={{ fontSize: 13, color: '#6EE7B7', fontWeight: 600, marginTop: 4 }}>
+                  {workoutContent.todayName || new Date().toLocaleDateString('en-US', { weekday: 'long' })}
+                </div>
               </div>
-              <div style={{ fontSize: 13, color: '#6EE7B7', fontWeight: 600, marginTop: 4 }}>
-                {workoutContent.todayName || new Date().toLocaleDateString('en-US', { weekday: 'long' })}
+              <div style={{ flexShrink: 0 }}>
+                <WorkoutMuscleMap
+                  exerciseNames={workoutContent.todayExercises?.map((e) => e.name) || []}
+                  view="both"
+                  size="small"
+                />
               </div>
             </div>
             <div style={{ padding: '12px 20px 18px' }}>
               {workoutContent.todayExercises.slice(0, 5).map((ex, i) => (
-                <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: i < workoutContent.todayExercises.length - 1 ? '1px solid rgba(110,231,183,0.04)' : 'none' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                    <div style={{ width: 24, height: 24, borderRadius: 8, background: 'rgba(110,231,183,0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, color: '#6EE7B7' }}>{i + 1}</div>
-                    <div>
-                      <div style={{ fontSize: 13, fontWeight: 600, color: '#D1FAE5' }}>{ex.name}</div>
-                      <div style={{ fontSize: 11, color: '#1F4030' }}>Rest {ex.rest}</div>
-                    </div>
-                  </div>
-                  <div className="gradient-green" style={{ fontSize: 12, fontWeight: 700 }}>{ex.sets}</div>
-                </div>
+                <ExerciseRow
+                  key={i}
+                  name={ex.name}
+                  sets={ex.sets}
+                  rest={ex.rest}
+                  index={i + 1}
+                  isLast={i >= Math.min(5, workoutContent.todayExercises.length) - 1}
+                />
               ))}
               <button
                 onClick={() => router.push('/plans')}
@@ -374,39 +423,59 @@ export default function Dashboard() {
         )}
       </motion.div>
 
-      {/* E. Macros Card */}
-      {mealContent && (
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: cardDelays[4] }}
-          style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 14 }}
-        >
-          {[
-            { label: 'Calories', value: mealContent.dailyCalories || '—', color: '#6EE7B7', pct: 0 },
-            { label: 'Protein', value: mealContent.protein || '—', color: '#FBBF24', pct: 0 },
-            { label: 'Carbs', value: mealContent.carbs || '—', color: '#93C5FD', pct: 0 },
-            { label: 'Fats', value: mealContent.fats || '—', color: '#FB7185', pct: 0 },
-          ].map((m, i) => (
-            <div key={i} className="glass" style={{ padding: 0, overflow: 'hidden' }}>
-              <div style={{ height: 2, background: m.color, opacity: 0.5 }} />
-              <div style={{ padding: '14px 16px', display: 'flex', alignItems: 'center', gap: 12 }}>
-                <svg width={36} height={36} style={{ transform: 'rotate(-90deg)' }}>
-                  <circle cx={18} cy={18} r={14} fill="none" stroke="rgba(110,231,183,0.1)" strokeWidth={4} />
-                  <circle cx={18} cy={18} r={14} fill="none" stroke={m.color} strokeWidth={4} strokeDasharray={`${m.pct * 0.88} 88`} strokeLinecap="round" />
-                </svg>
-                <div>
-                  <div style={{ fontSize: 11, color: '#2D5B3F', fontWeight: 600 }}>{m.label}</div>
-                  <div style={{ fontSize: 20, fontWeight: 800, color: m.color }}>{m.value}</div>
+      {/* F. Macros Card */}
+      {mealContent && (() => {
+        const parseTarget = (v) => parseInt(String(v || '').replace(/[^\d]/g, ''), 10) || 0
+        const targetCal = parseTarget(mealContent.dailyCalories) || 2000
+        const targetP = parseTarget(mealContent.protein) || 150
+        const targetC = parseTarget(mealContent.carbs) || 200
+        const targetF = parseTarget(mealContent.fats) || 65
+        const actual = todayMeals.reduce(
+          (a, m) => ({
+            cal: a.cal + (parseFloat(m.total_calories) || 0),
+            p: a.p + (parseFloat(m.total_protein) || 0),
+            c: a.c + (parseFloat(m.total_carbs) || 0),
+            f: a.f + (parseFloat(m.total_fats) || 0),
+          }),
+          { cal: 0, p: 0, c: 0, f: 0 }
+        )
+        const macros = [
+          { label: 'Calories', actual: Math.round(actual.cal), target: targetCal, color: '#6EE7B7' },
+          { label: 'Protein', actual: actual.p.toFixed(1), target: targetP, color: '#FBBF24' },
+          { label: 'Carbs', actual: actual.c.toFixed(1), target: targetC, color: '#93C5FD' },
+          { label: 'Fats', actual: actual.f.toFixed(1), target: targetF, color: '#FB7185' },
+        ]
+        return (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: cardDelays[4] }}
+            style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 14 }}
+          >
+            {macros.map((m, i) => {
+              const pct = Math.min(1, m.actual / Math.max(m.target, 1))
+              return (
+                <div key={i} className="glass" style={{ padding: 0, overflow: 'hidden' }}>
+                  <div style={{ height: 2, background: m.color, opacity: 0.5 }} />
+                  <div style={{ padding: '14px 16px', display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <svg width={36} height={36} style={{ transform: 'rotate(-90deg)' }}>
+                      <circle cx={18} cy={18} r={14} fill="none" stroke="rgba(110,231,183,0.1)" strokeWidth={4} />
+                      <circle cx={18} cy={18} r={14} fill="none" stroke={m.color} strokeWidth={4} strokeDasharray={`${pct * 88} 88`} strokeLinecap="round" />
+                    </svg>
+                    <div>
+                      <div style={{ fontSize: 11, color: '#2D5B3F', fontWeight: 600 }}>{m.label}</div>
+                      <div style={{ fontSize: 18, fontWeight: 800, color: m.color }}>{m.actual}/{m.target}</div>
+                    </div>
+                  </div>
                 </div>
-              </div>
-            </div>
-          ))}
-        </motion.div>
-      )}
+              )
+            })}
+          </motion.div>
+        )
+      })()}
 
-      {/* F. Nutrition Summary */}
-      {mealContent && mealContent.meals && (
+      {/* G. Nutrition Summary */}
+      {mealContent && (
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -416,10 +485,23 @@ export default function Dashboard() {
         >
           <div style={{ padding: '16px 18px', borderBottom: '1px solid rgba(110,231,183,0.05)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div style={{ fontSize: 16, fontWeight: 700, color: '#fff' }}>Nutrition</div>
-            <div style={{ fontSize: 12, color: '#6EE7B7', fontWeight: 600 }}>{mealContent.dailyCalories} total</div>
+            <button
+              onClick={() => setFoodLogModalOpen(true)}
+              style={{
+                padding: '8px 14px',
+                borderRadius: 12,
+                border: '1px solid rgba(110,231,183,0.3)',
+                background: 'rgba(16,185,129,0.2)',
+                color: '#6EE7B7',
+                fontSize: 12,
+                fontWeight: 600,
+              }}
+            >
+              🍽️ Log Meal
+            </button>
           </div>
           <div style={{ padding: '4px 18px 14px' }}>
-            {['🍳', '🥗', '🍌', '🥩'].map((emoji, i) => {
+            {mealContent.meals && ['🍳', '🥗', '🍌', '🥩'].map((emoji, i) => {
               const m = mealContent.meals[i]
               if (!m) return null
               return (
@@ -438,29 +520,48 @@ export default function Dashboard() {
                 </div>
               )
             })}
+            {todayMeals.length > 0 && (
+              <>
+                <div style={{ fontSize: 13, fontWeight: 700, color: '#6EE7B7', marginTop: 12, marginBottom: 8 }}>Meals Logged Today</div>
+                {todayMeals.map((meal, i) => (
+                  <div key={meal.id || i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: '1px solid rgba(110,231,183,0.04)', fontSize: 12 }}>
+                    <span style={{ color: '#D1FAE5' }}>{meal.meal_name} · {new Date(meal.logged_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</span>
+                    <span style={{ color: '#6EE7B7', fontWeight: 600 }}>{Math.round(parseFloat(meal.total_calories) || 0)} cal · {parseFloat(meal.total_protein || 0).toFixed(1)}g P</span>
+                  </div>
+                ))}
+              </>
+            )}
           </div>
         </motion.div>
       )}
 
-      {/* G. Quick Actions */}
+      {/* H. Quick Actions */}
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: cardDelays[6] }}
-        style={{ display: 'flex', gap: 10, marginBottom: 24 }}
+        style={{ display: 'flex', gap: 10, marginBottom: 24, flexWrap: 'wrap' }}
       >
         <button
           onClick={() => router.push('/chat')}
           className="glass-sm"
-          style={{ flex: 1, padding: 14, textAlign: 'center', border: '1px solid rgba(110,231,183,0.1)' }}
+          style={{ flex: 1, minWidth: 100, padding: 14, textAlign: 'center', border: '1px solid rgba(110,231,183,0.1)' }}
         >
           <div style={{ fontSize: 20, marginBottom: 4 }}>💬</div>
           <div style={{ fontSize: 11, fontWeight: 600, color: '#6EE7B7' }}>Ask {trainer.name.split(' ').pop()}</div>
         </button>
         <button
+          onClick={() => setFoodLogModalOpen(true)}
+          className="glass-sm"
+          style={{ flex: 1, minWidth: 100, padding: 14, textAlign: 'center', border: '1px solid rgba(110,231,183,0.1)' }}
+        >
+          <div style={{ fontSize: 20, marginBottom: 4 }}>🍽️</div>
+          <div style={{ fontSize: 11, fontWeight: 600, color: '#6EE7B7' }}>Log Meal</div>
+        </button>
+        <button
           onClick={() => router.push('/chat?prompt=body')}
           className="glass-sm"
-          style={{ flex: 1, padding: 14, textAlign: 'center', border: '1px solid rgba(110,231,183,0.1)' }}
+          style={{ flex: 1, minWidth: 100, padding: 14, textAlign: 'center', border: '1px solid rgba(110,231,183,0.1)' }}
         >
           <div style={{ fontSize: 20, marginBottom: 4 }}>📷</div>
           <div style={{ fontSize: 11, fontWeight: 600, color: '#6EE7B7' }}>Body Check</div>
@@ -468,7 +569,7 @@ export default function Dashboard() {
         <button
           onClick={() => setWeightModalOpen(true)}
           className="glass-sm"
-          style={{ flex: 1, padding: 14, textAlign: 'center', border: '1px solid rgba(110,231,183,0.1)' }}
+          style={{ flex: 1, minWidth: 100, padding: 14, textAlign: 'center', border: '1px solid rgba(110,231,183,0.1)' }}
         >
           <div style={{ fontSize: 20, marginBottom: 4 }}>⚖️</div>
           <div style={{ fontSize: 11, fontWeight: 600, color: '#6EE7B7' }}>Log Weight</div>
@@ -487,6 +588,12 @@ export default function Dashboard() {
         profile={profile}
         currentTrainer={trainer}
         onSelect={handleSelectTrainer}
+      />
+      <FoodLogModal
+        open={foodLogModalOpen}
+        onClose={() => setFoodLogModalOpen(false)}
+        profileId={profile?.id}
+        onLog={handleMealLogged}
       />
     </div>
   )

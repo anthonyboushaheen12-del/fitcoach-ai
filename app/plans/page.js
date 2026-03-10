@@ -6,6 +6,8 @@ import { motion } from 'framer-motion'
 import { supabase } from '../../lib/supabase'
 import { getTrainer } from '../../lib/trainers'
 import { useAuth } from '../components/AuthProvider'
+import ExerciseRow from '../components/ExerciseRow'
+import WorkoutMuscleMap from '../components/WorkoutMuscleMap'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const MEAL_EMOJIS = ['🍳', '🥗', '🍌', '🥩']
@@ -149,43 +151,16 @@ export default function Plans() {
                   </motion.div>
                 )}
                 {todayExercises.map((ex, i) => (
-                  <motion.div
-                    key={i}
-                    initial={{ opacity: 0, y: 4 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: i * 0.03 }}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      padding: '12px 0',
-                      borderBottom: i < todayExercises.length - 1 ? '1px solid rgba(110,231,183,0.06)' : 'none',
-                    }}
-                  >
-                    <button
-                      onClick={() => toggleExercise(todayDayIndex, i)}
-                      style={{
-                        width: 28,
-                        height: 28,
-                        borderRadius: 10,
-                        border: checkedExercises[`${todayDayIndex}-${i}`] ? 'none' : '2px solid rgba(110,231,183,0.3)',
-                        background: checkedExercises[`${todayDayIndex}-${i}`] ? 'linear-gradient(135deg, #10B981, #6EE7B7)' : 'transparent',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        flexShrink: 0,
-                        marginRight: 12,
-                      }}
-                    >
-                      {checkedExercises[`${todayDayIndex}-${i}`] && (
-                        <motion.span initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ type: 'spring', stiffness: 400 }} style={{ color: '#070B07', fontSize: 14 }}>✓</motion.span>
-                      )}
-                    </button>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 14, fontWeight: 600, color: '#D1FAE5', textDecoration: checkedExercises[`${todayDayIndex}-${i}`] ? 'line-through' : 'none', opacity: checkedExercises[`${todayDayIndex}-${i}`] ? 0.7 : 1 }}>{ex.name}</div>
-                      <div style={{ fontSize: 11, color: '#1F4030', marginTop: 2 }}>Rest {ex.rest || '60s'}</div>
-                    </div>
-                    <div className="gradient-green" style={{ fontSize: 13, fontWeight: 700 }}>{ex.sets}</div>
+                  <motion.div key={i} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.03 }}>
+                    <ExerciseRow
+                      name={ex.name}
+                      sets={ex.sets}
+                      rest={ex.rest || '60s'}
+                      showCheckbox
+                      onToggle={() => toggleExercise(todayDayIndex, i)}
+                      isChecked={checkedExercises[`${todayDayIndex}-${i}`]}
+                      isLast={i >= todayExercises.length - 1}
+                    />
                   </motion.div>
                 ))}
               </div>
@@ -239,40 +214,27 @@ export default function Plans() {
                     </button>
                     {isExpanded && (
                       <div style={{ padding: '0 16px 16px', borderTop: '1px solid rgba(110,231,183,0.06)' }}>
+                        <div style={{ marginBottom: 12 }}>
+                          <WorkoutMuscleMap
+                            exerciseNames={(day.exercises || []).map((e) => e.name)}
+                            view="both"
+                            size="small"
+                          />
+                        </div>
                         <div style={{ height: 4, borderRadius: 100, background: 'rgba(110,231,183,0.1)', marginBottom: 12, overflow: 'hidden' }}>
                           <div style={{ height: '100%', width: `${(checked / Math.max(total, 1)) * 100}%`, background: 'linear-gradient(90deg, #10B981, #6EE7B7)', borderRadius: 100 }} />
                         </div>
                         {exs.map((ex, exIdx) => (
-                          <div
+                          <ExerciseRow
                             key={exIdx}
-                            style={{
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'space-between',
-                              padding: '10px 0',
-                              borderBottom: exIdx < exs.length - 1 ? '1px solid rgba(110,231,183,0.04)' : 'none',
-                            }}
-                          >
-                            <button
-                              onClick={() => toggleExercise(dayIdx, exIdx)}
-                              style={{
-                                width: 24,
-                                height: 24,
-                                borderRadius: 8,
-                                border: checkedExercises[`${dayIdx}-${exIdx}`] ? 'none' : '2px solid rgba(110,231,183,0.25)',
-                                background: checkedExercises[`${dayIdx}-${exIdx}`] ? 'linear-gradient(135deg, #10B981, #6EE7B7)' : 'transparent',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                marginRight: 10,
-                                flexShrink: 0,
-                              }}
-                            >
-                              {checkedExercises[`${dayIdx}-${exIdx}`] && <span style={{ color: '#070B07', fontSize: 12 }}>✓</span>}
-                            </button>
-                            <div style={{ flex: 1, fontSize: 13, color: '#D1FAE5', textDecoration: checkedExercises[`${dayIdx}-${exIdx}`] ? 'line-through' : 'none', opacity: checkedExercises[`${dayIdx}-${exIdx}`] ? 0.7 : 1 }}>{ex.name}</div>
-                            <span style={{ fontSize: 12, fontWeight: 600, color: '#6EE7B7' }}>{ex.sets}</span>
-                          </div>
+                            name={ex.name}
+                            sets={ex.sets}
+                            rest={ex.rest || '60s'}
+                            showCheckbox
+                            onToggle={() => toggleExercise(dayIdx, exIdx)}
+                            isChecked={checkedExercises[`${dayIdx}-${exIdx}`]}
+                            isLast={exIdx >= exs.length - 1}
+                          />
                         ))}
                       </div>
                     )}
