@@ -28,25 +28,40 @@ export function AuthProvider({ children }) {
       return
     }
 
+    let cancelled = false
+    const timeout = setTimeout(() => {
+      if (!cancelled) setLoading(false)
+    }, 8000)
+
     const initAuth = async () => {
-      const { data: { user: u } } = await supabase.auth.getUser()
-      setUser(u || null)
-      if (u) {
-        const p = await fetchProfile(u.id)
-        setProfile(p || null)
-        if (p) {
-          localStorage.setItem('profileId', p.id)
-          localStorage.setItem('profile', JSON.stringify(p))
+      try {
+        const { data: { user: u } } = await supabase.auth.getUser()
+        if (cancelled) return
+        setUser(u || null)
+        if (u) {
+          const p = await fetchProfile(u.id)
+          if (cancelled) return
+          setProfile(p || null)
+          if (p) {
+            localStorage.setItem('profileId', p.id)
+            localStorage.setItem('profile', JSON.stringify(p))
+          } else {
+            localStorage.removeItem('profileId')
+            localStorage.removeItem('profile')
+          }
         } else {
+          setProfile(null)
           localStorage.removeItem('profileId')
           localStorage.removeItem('profile')
         }
-      } else {
-        setProfile(null)
-        localStorage.removeItem('profileId')
-        localStorage.removeItem('profile')
+      } catch (err) {
+        console.error('Auth init error:', err)
+      } finally {
+        if (!cancelled) {
+          clearTimeout(timeout)
+          setLoading(false)
+        }
       }
-      setLoading(false)
     }
 
     initAuth()
@@ -73,7 +88,11 @@ export function AuthProvider({ children }) {
       }
     })
 
-    return () => subscription?.unsubscribe()
+    return () => {
+      cancelled = true
+      clearTimeout(timeout)
+      subscription?.unsubscribe()
+    }
   }, [fetchProfile])
 
   const signIn = async (email, password) => {
