@@ -33,6 +33,29 @@ export async function POST(request) {
     const doWorkout = type === 'workout' || type === 'both'
     const doMeal = type === 'meal' || type === 'both'
 
+    let workoutLogs = []
+    let mealLogs = []
+    try {
+      const [workoutLogsRes, mealLogsRes] = await Promise.all([
+        supabase.from('workout_logs').select('*').eq('profile_id', profileId).order('logged_at', { ascending: false }).limit(20),
+        supabase.from('meal_logs').select('*').eq('profile_id', profileId).order('logged_at', { ascending: false }).limit(14),
+      ])
+      workoutLogs = workoutLogsRes.data || []
+      mealLogs = mealLogsRes.data || []
+    } catch (_) {
+      // workout_logs table may not exist yet
+    }
+    const workoutActivityContext = workoutLogs.length > 0
+      ? `\n\nUser's recent workouts (use to avoid redundancy or build on what they're doing):\n${workoutLogs.map((w) => {
+          const exs = (w.exercises || []).map((e) => `${e.name} ${e.sets}x${e.reps}`).join(', ')
+          return `${new Date(w.logged_at).toLocaleDateString()}: ${exs}`
+        }).join('\n')}`
+      : ''
+
+    const mealActivityContext = mealLogs.length > 0
+      ? `\n\nUser's recent meals (understand their eating patterns):\n${mealLogs.map((m) => `${m.meal_name}: ${m.total_calories} cal, ${m.total_protein}g P`).join('\n')}`
+      : ''
+
     let workoutPlan = null
     let mealPlan = null
 
@@ -45,7 +68,8 @@ export async function POST(request) {
 
       const wp = workoutPreferences
       const prefText = `
-Generate a complete workout plan for me based on my profile AND these specific preferences:
+Generate a complete workout plan for me based on my profile AND these specific preferences:${workoutActivityContext}
+
 - Experience Level: ${wp.experience || 'intermediate'}
 - Available Days: ${wp.daysPerWeek || 4} days per week
 - Training Focus: ${Array.isArray(wp.focus) ? wp.focus.join(', ') : (wp.focus || 'overall muscle building')}
@@ -118,7 +142,8 @@ Include all days with all exercises. Make todayExercises match the first day.`,
 
       const mp = mealPreferences
       const prefText = `
-Generate a daily meal plan for me based on my profile AND these specific preferences:
+Generate a daily meal plan for me based on my profile AND these specific preferences:${mealActivityContext}
+
 - Dietary Preference: ${mp.diet || 'no restrictions'}
 - Meals Per Day: ${mp.mealsPerDay || 4}
 - Cooking Ability: ${mp.cookingAbility || 'moderate'}

@@ -11,7 +11,7 @@ const steps = ['basics', 'body', 'goals', 'trainer']
 
 export default function OnboardingPage() {
   const router = useRouter()
-  const { user, refreshProfile } = useAuth()
+  const { user, profile, profileLoading, refreshProfile } = useAuth()
   const [step, setStep] = useState(0)
   const [direction, setDirection] = useState(1)
   const [loading, setLoading] = useState(false)
@@ -34,7 +34,10 @@ export default function OnboardingPage() {
       router.push('/')
       return
     }
-  }, [user, router])
+    if (!profileLoading && profile) {
+      router.replace('/dashboard')
+    }
+  }, [user, profile, profileLoading, router])
 
   const goNext = () => {
     if (step < steps.length - 1) {

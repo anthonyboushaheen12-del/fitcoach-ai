@@ -8,7 +8,7 @@ import { supabase } from '../lib/supabase'
 
 export default function AuthPage() {
   const router = useRouter()
-  const { user, profile, loading: authLoading, signIn, signUp } = useAuth()
+  const { user, profile, loading: authLoading, profileLoading, signIn, signUp } = useAuth()
   const [tab, setTab] = useState('signin')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -19,8 +19,8 @@ export default function AuthPage() {
   const [resendSent, setResendSent] = useState(false)
   const [resending, setResending] = useState(false)
 
-  // Redirect if already authenticated
-  if (authLoading) {
+  // Wait for auth and profile to resolve before redirecting
+  if (authLoading || profileLoading) {
     return (
       <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#070B07' }}>
         <div style={{ textAlign: 'center' }}>
@@ -31,6 +31,7 @@ export default function AuthPage() {
     )
   }
 
+  // Only redirect once profile has been resolved (not loading)
   if (user && profile) {
     router.replace('/dashboard')
     return null

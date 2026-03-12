@@ -232,10 +232,10 @@ export default function Plans() {
       })
       const data = await res.json()
       if (data.success) {
-        await loadPlans(profile.id)
-        await refreshProfile()
+        await Promise.all([loadPlans(profile.id), refreshProfile()])
         setView('overview')
         setWorkoutQuizStep(0)
+        router.push('/dashboard')
       } else throw new Error(data.error || 'Failed')
     } catch (err) {
       setGenError(err?.message || 'Failed to generate plan')
@@ -263,10 +263,10 @@ export default function Plans() {
       })
       const data = await res.json()
       if (data.success) {
-        await loadPlans(profile.id)
-        await refreshProfile()
+        await Promise.all([loadPlans(profile.id), refreshProfile()])
         setView('overview')
         setMealQuizStep(0)
+        router.push('/dashboard')
       } else throw new Error(data.error || 'Failed')
     } catch (err) {
       setGenError(err?.message || 'Failed to generate plan')

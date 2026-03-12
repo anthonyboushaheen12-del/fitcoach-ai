@@ -11,6 +11,7 @@ export function AuthProvider({ children }) {
   const [user, setUser] = useState(null)
   const [profile, setProfile] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [profileLoading, setProfileLoading] = useState(false)
 
   const fetchProfile = useCallback(async (userId) => {
     if (!supabase || !userId) return null
@@ -39,15 +40,20 @@ export function AuthProvider({ children }) {
         if (cancelled) return
         setUser(u || null)
         if (u) {
-          const p = await fetchProfile(u.id)
-          if (cancelled) return
-          setProfile(p || null)
-          if (p) {
-            localStorage.setItem('profileId', p.id)
-            localStorage.setItem('profile', JSON.stringify(p))
-          } else {
-            localStorage.removeItem('profileId')
-            localStorage.removeItem('profile')
+          setProfileLoading(true)
+          try {
+            const p = await fetchProfile(u.id)
+            if (cancelled) return
+            setProfile(p || null)
+            if (p) {
+              localStorage.setItem('profileId', p.id)
+              localStorage.setItem('profile', JSON.stringify(p))
+            } else {
+              localStorage.removeItem('profileId')
+              localStorage.removeItem('profile')
+            }
+          } finally {
+            if (!cancelled) setProfileLoading(false)
           }
         } else {
           setProfile(null)
@@ -70,17 +76,23 @@ export function AuthProvider({ children }) {
       const u = session?.user || null
       setUser(u)
       if (u) {
-        const p = await fetchProfile(u.id)
-        setProfile(p || null)
-        if (p) {
-          localStorage.setItem('profileId', p.id)
-          localStorage.setItem('profile', JSON.stringify(p))
-        } else {
-          localStorage.removeItem('profileId')
-          localStorage.removeItem('profile')
+        setProfileLoading(true)
+        try {
+          const p = await fetchProfile(u.id)
+          setProfile(p || null)
+          if (p) {
+            localStorage.setItem('profileId', p.id)
+            localStorage.setItem('profile', JSON.stringify(p))
+          } else {
+            localStorage.removeItem('profileId')
+            localStorage.removeItem('profile')
+          }
+        } finally {
+          setProfileLoading(false)
         }
       } else {
         setProfile(null)
+        setProfileLoading(false)
         localStorage.removeItem('profileId')
         localStorage.removeItem('profile')
         localStorage.removeItem('onboardingContext')
@@ -131,7 +143,7 @@ export function AuthProvider({ children }) {
 
   if (loading) {
     return (
-      <AuthContext.Provider value={{ user, profile, loading, signIn, signUp, signOut, refreshProfile, fetchProfile }}>
+      <AuthContext.Provider value={{ user, profile, loading, profileLoading, signIn, signUp, signOut, refreshProfile, fetchProfile }}>
         <div style={{
           minHeight: '100vh',
           display: 'flex',
@@ -163,6 +175,7 @@ export function AuthProvider({ children }) {
         user,
         profile,
         loading,
+        profileLoading,
         signIn,
         signUp,
         signOut,

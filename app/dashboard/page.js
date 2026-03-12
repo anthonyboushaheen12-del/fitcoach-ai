@@ -12,6 +12,8 @@ import TrainerModal from '../components/TrainerModal'
 import ExerciseRow from '../components/ExerciseRow'
 import WorkoutMuscleMap from '../components/WorkoutMuscleMap'
 import FoodLogModal from '../components/FoodLogModal'
+import LogWorkoutModal from '../components/LogWorkoutModal'
+import BodyImageSlot from '../components/BodyImageSlot'
 
 function getGreeting(name) {
   const h = new Date().getHours()
@@ -23,15 +25,19 @@ function getGreeting(name) {
 
 export default function Dashboard() {
   const router = useRouter()
-  const { user, profile: authProfile, loading: authLoading, refreshProfile } = useAuth()
+  const { user, profile: authProfile, loading: authLoading, profileLoading, refreshProfile } = useAuth()
   const [plans, setPlans] = useState({ workout: null, meal: null })
   const [weightLogs, setWeightLogs] = useState([])
   const [loading, setLoading] = useState(true)
   const [weightModalOpen, setWeightModalOpen] = useState(false)
   const [trainerModalOpen, setTrainerModalOpen] = useState(false)
   const [foodLogModalOpen, setFoodLogModalOpen] = useState(false)
+  const [workoutLogModalOpen, setWorkoutLogModalOpen] = useState(false)
   const [toast, setToast] = useState(null)
   const [todayMeals, setTodayMeals] = useState([])
+  const [recentWorkouts, setRecentWorkouts] = useState([])
+  const [analysisLoading, setAnalysisLoading] = useState(false)
+  const [analysisResult, setAnalysisResult] = useState(null)
 
   const profile = authProfile
   const trainer = profile ? getTrainer(profile.trainer) : getTrainer('bro')
@@ -41,11 +47,11 @@ export default function Dashboard() {
       router.push('/')
       return
     }
-    if (user && !authProfile) {
+    if (user && !authProfile && !profileLoading) {
       router.push('/onboarding')
       return
     }
-  }, [user, authProfile, router])
+  }, [user, authProfile, profileLoading, router])
 
   useEffect(() => {
     if (!profile?.id) return
@@ -61,28 +67,40 @@ export default function Dashboard() {
       .catch(() => setTodayMeals([]))
   }, [profile?.id])
 
+  useEffect(() => {
+    if (!profile?.id) return
+    fetch(`/api/workout-log?profileId=${profile.id}&limit=10`)
+      .then((r) => r.json())
+      .then((data) => setRecentWorkouts(data.workouts || []))
+      .catch(() => setRecentWorkouts([]))
+  }, [profile?.id])
+
   async function loadPlansAndWeightLogs() {
     if (!profile) return
     const profileId = profile.id
 
-    const { data: plansData } = await supabase
-      .from('plans')
-      .select('*')
-      .eq('profile_id', profileId)
-      .eq('active', true)
+    const [plansResult, logsResult] = await Promise.all([
+      supabase
+        .from('plans')
+        .select('*')
+        .eq('profile_id', profileId)
+        .eq('active', true),
+      supabase
+        .from('weight_logs')
+        .select('*')
+        .eq('profile_id', profileId)
+        .order('created_at', { ascending: true })
+        .limit(60),
+    ])
+
+    const plansData = plansResult.data
+    const logs = logsResult.data
 
     if (plansData) {
       const workout = plansData.find((p) => p.type === 'workout')
       const meal = plansData.find((p) => p.type === 'meal')
       setPlans({ workout, meal })
     }
-
-    const { data: logs } = await supabase
-      .from('weight_logs')
-      .select('*')
-      .eq('profile_id', profileId)
-      .order('created_at', { ascending: true })
-      .limit(60)
 
     const built = []
     const startDate = profile?.created_at ? new Date(profile.created_at).toISOString().split('T')[0] : new Date().toISOString().split('T')[0]
@@ -127,6 +145,34 @@ export default function Dashboard() {
     })
   }
 
+  async function handleAnalyze() {
+    if (!profile?.id) return
+    setAnalysisLoading(true)
+    setAnalysisResult(null)
+    try {
+      const res = await fetch('/api/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ profileId: profile.id }),
+      })
+      const data = await res.json()
+      if (data.error) throw new Error(data.error)
+      setAnalysisResult(data.summary || data.recommendation)
+    } catch (err) {
+      setAnalysisResult(`Error: ${err?.message || 'Analysis failed'}`)
+    } finally {
+      setAnalysisLoading(false)
+    }
+  }
+
+  async function handleWorkoutLogged() {
+    const res = await fetch(`/api/workout-log?profileId=${profile.id}&limit=10`)
+    const data = await res.json()
+    setRecentWorkouts(data.workouts || [])
+    setToast('Workout logged!')
+    setTimeout(() => setToast(null), 2000)
+  }
+
   async function handleMealLogged() {
     const today = new Date().toISOString().split('T')[0]
     const res = await fetch(`/api/meal-log?profileId=${profile.id}&date=${today}`)
@@ -144,7 +190,7 @@ export default function Dashboard() {
     setTimeout(() => setToast(null), 2000)
   }
 
-  if (authLoading || loading || !profile) {
+  if (authLoading || profileLoading || loading || !profile) {
     return (
       <div style={{ padding: 40, textAlign: 'center', color: '#2D5B3F' }}>
         <motion.div animate={{ rotate: 360 }} transition={{ duration: 1, repeat: Infinity, ease: 'linear' }} style={{ fontSize: 32, marginBottom: 12 }}>🏋️</motion.div>
@@ -161,7 +207,7 @@ export default function Dashboard() {
   const weightDiff = currentWeight - startWeight
   const progressDir = profile.goal === 'lose_fat' ? (weightDiff < 0 ? 'good' : 'bad') : profile.goal === 'build_muscle' ? (weightDiff > 0 ? 'good' : 'bad') : 'neutral'
 
-  const cardDelays = [0, 100, 200, 300, 400, 500, 600]
+  const cardDelays = [0, 100, 200, 300, 400, 500, 600, 700]
 
   return (
     <div style={{ padding: '18px 20px 0' }}>
@@ -359,37 +405,63 @@ export default function Dashboard() {
             </div>
           </div>
         ) : (
-          <div className="glass" style={{ padding: 24, marginBottom: 14, textAlign: 'center', border: '1px dashed rgba(110,231,183,0.2)' }}>
+          <div className="glass" style={{ padding: 24, marginBottom: 14, border: '1px dashed rgba(110,231,183,0.2)' }}>
             <div style={{ fontSize: 28, marginBottom: 12 }}>🏋️</div>
-            <div style={{ fontSize: 16, fontWeight: 700, color: '#fff', marginBottom: 8 }}>No Workout Plan Yet</div>
-            <div style={{ fontSize: 13, color: '#2D5B3F', marginBottom: 16 }}>Create your personalized workout plan</div>
-            <button
-              onClick={() => router.push('/plans?start=workout')}
-              style={{
-                width: '100%',
-                padding: 16,
-                borderRadius: 14,
-                border: 'none',
-                background: 'linear-gradient(135deg, #10B981, #6EE7B7)',
-                color: '#070B07',
-                fontSize: 15,
-                fontWeight: 700,
-                boxShadow: '0 4px 20px rgba(16,185,129,0.35)',
-              }}
-            >
-              Create Workout Plan →
-            </button>
+            <div style={{ fontSize: 16, fontWeight: 700, color: '#fff', marginBottom: 8 }}>Today&apos;s Workout</div>
+            <div style={{ fontSize: 13, color: '#2D5B3F', marginBottom: 16 }}>Log your workout or create a plan</div>
+            {recentWorkouts.length > 0 && (
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ fontSize: 11, color: '#2D5B3F', fontWeight: 600, marginBottom: 6 }}>Recent</div>
+                {recentWorkouts.slice(0, 2).map((w) => (
+                  <div key={w.id} style={{ padding: 10, background: 'rgba(14,20,14,0.5)', borderRadius: 10, marginBottom: 6, fontSize: 12, color: '#D1FAE5' }}>
+                    {new Date(w.logged_at).toLocaleDateString()} · {(w.exercises || []).slice(0, 2).map((e) => e.name).join(', ')}
+                  </div>
+                ))}
+              </div>
+            )}
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button
+                onClick={() => setWorkoutLogModalOpen(true)}
+                style={{
+                  flex: 1,
+                  padding: 14,
+                  borderRadius: 12,
+                  border: '1px solid rgba(110,231,183,0.3)',
+                  background: 'rgba(16,185,129,0.2)',
+                  color: '#6EE7B7',
+                  fontSize: 14,
+                  fontWeight: 600,
+                }}
+              >
+                Log Workout
+              </button>
+              <button
+                onClick={() => router.push('/plans?start=workout')}
+                style={{
+                  flex: 1,
+                  padding: 14,
+                  borderRadius: 12,
+                  border: 'none',
+                  background: 'linear-gradient(135deg, #10B981, #6EE7B7)',
+                  color: '#070B07',
+                  fontSize: 14,
+                  fontWeight: 600,
+                }}
+              >
+                Create Plan
+              </button>
+            </div>
           </div>
         )}
       </motion.div>
 
-      {/* F. Macros Card - only when meal plan exists */}
-      {mealContent ? (() => {
+      {/* F. Nutrition - always visible (meal logging without plan) */}
+      {(() => {
         const parseTarget = (v) => parseInt(String(v || '').replace(/[^\d]/g, ''), 10) || 0
-        const targetCal = parseTarget(mealContent.dailyCalories) || 2000
-        const targetP = parseTarget(mealContent.protein) || 150
-        const targetC = parseTarget(mealContent.carbs) || 200
-        const targetF = parseTarget(mealContent.fats) || 65
+        const targetCal = mealContent ? parseTarget(mealContent.dailyCalories) : 2000
+        const targetP = mealContent ? parseTarget(mealContent.protein) : 150
+        const targetC = mealContent ? parseTarget(mealContent.carbs) : 200
+        const targetF = mealContent ? parseTarget(mealContent.fats) : 65
         const actual = todayMeals.reduce(
           (a, m) => ({
             cal: a.cal + (parseFloat(m.total_calories) || 0),
@@ -410,61 +482,84 @@ export default function Dashboard() {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: cardDelays[4] }}
-            style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 14 }}
+            style={{ marginBottom: 14 }}
           >
-            {macros.map((m, i) => {
-              const pct = Math.min(1, m.actual / Math.max(m.target, 1))
-              return (
-                <div key={i} className="glass" style={{ padding: 0, overflow: 'hidden' }}>
-                  <div style={{ height: 2, background: m.color, opacity: 0.5 }} />
-                  <div style={{ padding: '14px 16px', display: 'flex', alignItems: 'center', gap: 12 }}>
-                    <svg width={36} height={36} style={{ transform: 'rotate(-90deg)' }}>
-                      <circle cx={18} cy={18} r={14} fill="none" stroke="rgba(110,231,183,0.1)" strokeWidth={4} />
-                      <circle cx={18} cy={18} r={14} fill="none" stroke={m.color} strokeWidth={4} strokeDasharray={`${pct * 88} 88`} strokeLinecap="round" />
-                    </svg>
-                    <div>
-                      <div style={{ fontSize: 11, color: '#2D5B3F', fontWeight: 600 }}>{m.label}</div>
-                      <div style={{ fontSize: 18, fontWeight: 800, color: m.color }}>{m.actual}/{m.target}</div>
+            <div className="glass" style={{ padding: 0, overflow: 'hidden', marginBottom: 10 }}>
+              <div style={{ padding: '16px 18px', borderBottom: '1px solid rgba(110,231,183,0.05)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div style={{ fontSize: 16, fontWeight: 700, color: '#fff' }}>Nutrition</div>
+                <button
+                  onClick={() => setFoodLogModalOpen(true)}
+                  style={{
+                    padding: '8px 14px',
+                    borderRadius: 12,
+                    border: '1px solid rgba(110,231,183,0.3)',
+                    background: 'rgba(16,185,129,0.2)',
+                    color: '#6EE7B7',
+                    fontSize: 12,
+                    fontWeight: 600,
+                  }}
+                >
+                  🍽️ Log Meal
+                </button>
+              </div>
+              <div style={{ padding: '4px 18px 14px' }}>
+                {todayMeals.length > 0 ? (
+                  <div style={{ fontSize: 13, fontWeight: 700, color: '#6EE7B7', marginBottom: 8 }}>Meals Logged Today</div>
+                ) : (
+                  <div style={{ fontSize: 13, color: '#2D5B3F', marginBottom: 8 }}>No meals logged yet today</div>
+                )}
+                {todayMeals.map((meal, i) => (
+                  <div key={meal.id || i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: '1px solid rgba(110,231,183,0.04)', fontSize: 12 }}>
+                    <span style={{ color: '#D1FAE5' }}>{meal.meal_name} · {new Date(meal.logged_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</span>
+                    <span style={{ color: '#6EE7B7', fontWeight: 600 }}>{Math.round(parseFloat(meal.total_calories) || 0)} cal · {parseFloat(meal.total_protein || 0).toFixed(1)}g P</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+              {macros.map((m, i) => {
+                const pct = Math.min(1, m.actual / Math.max(m.target, 1))
+                return (
+                  <div key={i} className="glass" style={{ padding: 0, overflow: 'hidden' }}>
+                    <div style={{ height: 2, background: m.color, opacity: 0.5 }} />
+                    <div style={{ padding: '14px 16px', display: 'flex', alignItems: 'center', gap: 12 }}>
+                      <svg width={36} height={36} style={{ transform: 'rotate(-90deg)' }}>
+                        <circle cx={18} cy={18} r={14} fill="none" stroke="rgba(110,231,183,0.1)" strokeWidth={4} />
+                        <circle cx={18} cy={18} r={14} fill="none" stroke={m.color} strokeWidth={4} strokeDasharray={`${pct * 88} 88`} strokeLinecap="round" />
+                      </svg>
+                      <div>
+                        <div style={{ fontSize: 11, color: '#2D5B3F', fontWeight: 600 }}>{m.label}</div>
+                        <div style={{ fontSize: 18, fontWeight: 800, color: m.color }}>{m.actual}/{m.target}</div>
+                      </div>
                     </div>
                   </div>
-                </div>
-              )
-            })}
+                )
+              })}
+            </div>
+            {!mealContent && (
+              <button
+                onClick={() => router.push('/plans?start=meal')}
+                style={{
+                  width: '100%',
+                  marginTop: 10,
+                  padding: 14,
+                  borderRadius: 12,
+                  border: '1px dashed rgba(249,115,22,0.3)',
+                  background: 'transparent',
+                  color: '#F97316',
+                  fontSize: 13,
+                  fontWeight: 600,
+                }}
+              >
+                Create Meal Plan for personalized targets →
+              </button>
+            )}
           </motion.div>
         )
-      })() : (
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: cardDelays[4] }}
-          className="glass"
-          style={{ padding: 24, marginBottom: 14, textAlign: 'center', border: '1px dashed rgba(249,115,22,0.2)' }}
-        >
-          <div style={{ fontSize: 28, marginBottom: 12 }}>🥗</div>
-          <div style={{ fontSize: 16, fontWeight: 700, color: '#fff', marginBottom: 8 }}>No Meal Plan Yet</div>
-          <div style={{ fontSize: 13, color: '#2D5B3F', marginBottom: 16 }}>Create your personalized meal plan</div>
-          <button
-            onClick={() => router.push('/plans?start=meal')}
-            style={{
-              width: '100%',
-              padding: 16,
-              borderRadius: 14,
-              border: 'none',
-              background: 'linear-gradient(135deg, #F97316, #EC4899)',
-              color: '#fff',
-              fontSize: 15,
-              fontWeight: 700,
-              boxShadow: '0 4px 20px rgba(249,115,22,0.25)',
-            }}
-          >
-            Create Meal Plan →
-          </button>
-        </motion.div>
-      )}
+      })()}
 
-
-      {/* G. Nutrition Summary */}
-      {mealContent && (
+      {/* G. Meal Plan Meals (only when plan exists) */}
+      {mealContent && mealContent.meals?.length > 0 && (
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -472,25 +567,11 @@ export default function Dashboard() {
           className="glass"
           style={{ padding: 0, marginBottom: 14, overflow: 'hidden' }}
         >
-          <div style={{ padding: '16px 18px', borderBottom: '1px solid rgba(110,231,183,0.05)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div style={{ fontSize: 16, fontWeight: 700, color: '#fff' }}>Nutrition</div>
-            <button
-              onClick={() => setFoodLogModalOpen(true)}
-              style={{
-                padding: '8px 14px',
-                borderRadius: 12,
-                border: '1px solid rgba(110,231,183,0.3)',
-                background: 'rgba(16,185,129,0.2)',
-                color: '#6EE7B7',
-                fontSize: 12,
-                fontWeight: 600,
-              }}
-            >
-              🍽️ Log Meal
-            </button>
+          <div style={{ padding: '16px 18px', borderBottom: '1px solid rgba(110,231,183,0.05)' }}>
+            <div style={{ fontSize: 16, fontWeight: 700, color: '#fff' }}>Your Meal Plan</div>
           </div>
           <div style={{ padding: '4px 18px 14px' }}>
-            {mealContent.meals && ['🍳', '🥗', '🍌', '🥩'].map((emoji, i) => {
+            {['🍳', '🥗', '🍌', '🥩'].map((emoji, i) => {
               const m = mealContent.meals[i]
               if (!m) return null
               return (
@@ -509,26 +590,110 @@ export default function Dashboard() {
                 </div>
               )
             })}
-            {todayMeals.length > 0 && (
-              <>
-                <div style={{ fontSize: 13, fontWeight: 700, color: '#6EE7B7', marginTop: 12, marginBottom: 8 }}>Meals Logged Today</div>
-                {todayMeals.map((meal, i) => (
-                  <div key={meal.id || i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: '1px solid rgba(110,231,183,0.04)', fontSize: 12 }}>
-                    <span style={{ color: '#D1FAE5' }}>{meal.meal_name} · {new Date(meal.logged_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</span>
-                    <span style={{ color: '#6EE7B7', fontWeight: 600 }}>{Math.round(parseFloat(meal.total_calories) || 0)} cal · {parseFloat(meal.total_protein || 0).toFixed(1)}g P</span>
-                  </div>
-                ))}
-              </>
-            )}
           </div>
         </motion.div>
       )}
 
-      {/* H. Quick Actions */}
+      {/* H. Body Progress */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: cardDelays[5] }}
+        className="glass"
+        style={{ padding: 18, marginBottom: 14 }}
+      >
+        <div style={{ fontSize: 16, fontWeight: 700, color: '#fff', marginBottom: 4 }}>Body Progress</div>
+        <div style={{ fontSize: 12, color: '#2D5B3F', marginBottom: 14 }}>Track your physique. Goal can be someone whose body you want to achieve.</div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <BodyImageSlot
+            label="My current physique"
+            imageUrl={profile.body_image_url}
+            userId={user?.id}
+            profileId={profile.id}
+            slot="current"
+            onUpload={refreshProfile}
+          />
+          <BodyImageSlot
+            label="Body I want to achieve"
+            hint="e.g. athlete or reference photo"
+            imageUrl={profile.goal_body_image_url}
+            userId={user?.id}
+            profileId={profile.id}
+            slot="goal"
+            onUpload={refreshProfile}
+          />
+        </div>
+      </motion.div>
+
+      {/* I. Get AI Analysis */}
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: cardDelays[6] }}
+        className="glass"
+        style={{ padding: 18, marginBottom: 14 }}
+      >
+        <div style={{ fontSize: 16, fontWeight: 700, color: '#fff', marginBottom: 4 }}>Get AI Analysis</div>
+        <div style={{ fontSize: 12, color: '#2D5B3F', marginBottom: 14 }}>Review your habits and get personalized recommendations</div>
+        <button
+          onClick={handleAnalyze}
+          disabled={analysisLoading}
+          style={{
+            width: '100%',
+            padding: 14,
+            borderRadius: 12,
+            border: '1px solid rgba(110,231,183,0.3)',
+            background: 'rgba(16,185,129,0.2)',
+            color: '#6EE7B7',
+            fontSize: 14,
+            fontWeight: 600,
+            opacity: analysisLoading ? 0.7 : 1,
+          }}
+        >
+          {analysisLoading ? 'Analyzing...' : 'Analyze my progress'}
+        </button>
+        {analysisResult && (
+          <div
+            style={{
+              marginTop: 14,
+              padding: 14,
+              background: 'rgba(14,20,14,0.6)',
+              borderRadius: 12,
+              border: '1px solid rgba(110,231,183,0.1)',
+              fontSize: 13,
+              color: '#D1FAE5',
+              whiteSpace: 'pre-wrap',
+              lineHeight: 1.5,
+            }}
+          >
+            {analysisResult}
+          </div>
+        )}
+        {analysisResult && (
+          <button
+            onClick={() => router.push('/plans')}
+            style={{
+              width: '100%',
+              marginTop: 10,
+              padding: 12,
+              borderRadius: 10,
+              border: 'none',
+              background: 'linear-gradient(135deg, #10B981, #6EE7B7)',
+              color: '#070B07',
+              fontSize: 13,
+              fontWeight: 600,
+            }}
+          >
+            Create Plan →
+          </button>
+        )}
+      </motion.div>
+
+      {/* J. Quick Actions */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: cardDelays[7] }}
         style={{ display: 'flex', gap: 10, marginBottom: 24, flexWrap: 'wrap' }}
       >
         <button
@@ -546,6 +711,14 @@ export default function Dashboard() {
         >
           <div style={{ fontSize: 20, marginBottom: 4 }}>🍽️</div>
           <div style={{ fontSize: 11, fontWeight: 600, color: '#6EE7B7' }}>Log Meal</div>
+        </button>
+        <button
+          onClick={() => setWorkoutLogModalOpen(true)}
+          className="glass-sm"
+          style={{ flex: 1, minWidth: 100, padding: 14, textAlign: 'center', border: '1px solid rgba(110,231,183,0.1)' }}
+        >
+          <div style={{ fontSize: 20, marginBottom: 4 }}>🏋️</div>
+          <div style={{ fontSize: 11, fontWeight: 600, color: '#6EE7B7' }}>Log Workout</div>
         </button>
         <button
           onClick={() => router.push('/chat?prompt=body')}
@@ -583,6 +756,12 @@ export default function Dashboard() {
         onClose={() => setFoodLogModalOpen(false)}
         profileId={profile?.id}
         onLog={handleMealLogged}
+      />
+      <LogWorkoutModal
+        open={workoutLogModalOpen}
+        onClose={() => setWorkoutLogModalOpen(false)}
+        profileId={profile?.id}
+        onLog={handleWorkoutLogged}
       />
     </div>
   )
