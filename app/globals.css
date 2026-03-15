@@ -35,12 +35,25 @@
   padding: 0;
 }
 
+html {
+  -webkit-tap-highlight-color: transparent;
+  min-height: 100dvh;
+  min-height: -webkit-fill-available;
+}
+
+html, body {
+  overscroll-behavior-y: none;
+}
+
 body {
   background: var(--bg-primary);
   color: var(--text-primary);
   font-family: 'Outfit', -apple-system, BlinkMacSystemFont, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  touch-action: manipulation;
+  min-height: 100dvh;
+  min-height: -webkit-fill-available;
 }
 
 /* Scrollbar hiding */
@@ -108,9 +121,10 @@ button:active {
   transform: scale(0.97);
 }
 
-/* Input base */
+/* Input base - 16px min to prevent iOS zoom on focus */
 input, textarea, select {
   font-family: 'Outfit', sans-serif;
+  font-size: max(16px, 1em);
 }
 
 input:focus, textarea:focus, select:focus {

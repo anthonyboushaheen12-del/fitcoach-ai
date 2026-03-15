@@ -12,15 +12,22 @@ export function AuthProvider({ children }) {
   const [profile, setProfile] = useState(null)
   const [loading, setLoading] = useState(true)
   const [profileLoading, setProfileLoading] = useState(false)
+  const [showFallback, setShowFallback] = useState(false)
 
   const fetchProfile = useCallback(async (userId) => {
     if (!supabase || !userId) return null
-    const { data } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('user_id', userId)
-      .maybeSingle()
-    return data
+    const timeout = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('Profile fetch timeout')), 3000)
+    )
+    try {
+      const { data } = await Promise.race([
+        supabase.from('profiles').select('*').eq('user_id', userId).maybeSingle(),
+        timeout,
+      ])
+      return data ?? null
+    } catch {
+      return null
+    }
   }, [])
 
   useEffect(() => {
@@ -31,8 +38,11 @@ export function AuthProvider({ children }) {
 
     let cancelled = false
     const timeout = setTimeout(() => {
-      if (!cancelled) setLoading(false)
-    }, 8000)
+      if (!cancelled) { setLoading(false); setProfileLoading(false) }
+    }, 3500)
+    const fallbackTimeout = setTimeout(() => {
+      if (!cancelled) setShowFallback(true)
+    }, 2500)
 
     const initAuth = async () => {
       try {
@@ -65,7 +75,9 @@ export function AuthProvider({ children }) {
       } finally {
         if (!cancelled) {
           clearTimeout(timeout)
+          clearTimeout(fallbackTimeout)
           setLoading(false)
+          setShowFallback(false)
         }
       }
     }
@@ -103,6 +115,7 @@ export function AuthProvider({ children }) {
     return () => {
       cancelled = true
       clearTimeout(timeout)
+      clearTimeout(fallbackTimeout)
       subscription?.unsubscribe()
     }
   }, [fetchProfile])
@@ -163,6 +176,25 @@ export function AuthProvider({ children }) {
               }}>AI</span>
             </div>
             <div style={{ color: '#2D5B3F', fontSize: 13, marginTop: 8 }}>Loading...</div>
+            {showFallback && (
+              <div style={{ marginTop: 24, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
+                <div style={{ color: '#6B7280', fontSize: 13 }}>Taking longer than expected?</div>
+                <button
+                  onClick={() => { setLoading(false); setProfileLoading(false); setShowFallback(false) }}
+                  style={{
+                    padding: '12px 28px',
+                    borderRadius: 12,
+                    border: '2px solid rgba(110,231,183,0.5)',
+                    background: 'rgba(16,185,129,0.25)',
+                    color: '#6EE7B7',
+                    fontSize: 15,
+                    fontWeight: 600,
+                  }}
+                >
+                  Continue anyway
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </AuthContext.Provider>

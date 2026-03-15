@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "setup:autopush": "powershell -ExecutionPolicy Bypass -File scripts/install-autopush.ps1"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.78.0",

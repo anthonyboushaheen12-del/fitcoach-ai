@@ -1,0 +1,9 @@
+{
+  "name": "FitCoach AI",
+  "short_name": "FitCoach",
+  "description": "AI-powered personal trainer",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#070B07",
+  "theme_color": "#070B07"
+}

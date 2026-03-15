@@ -26,8 +26,10 @@ export default function RootLayout({ children }) {
   return (
     <html lang="en">
       <head>
-        <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+        <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
         <meta name="theme-color" content="#070B07" />
+        <link rel="manifest" href="/manifest.json" />
+        <link rel="apple-touch-icon" href="/icon-192.png" />
         <title>FitCoach AI</title>
       </head>
       <body>
@@ -46,8 +48,8 @@ export default function RootLayout({ children }) {
             margin: '0 auto',
             position: 'relative',
             zIndex: 1,
-            minHeight: '100vh',
-            paddingBottom: hideNav ? 0 : 70,
+            minHeight: 'min(100vh, 100dvh)',
+            paddingBottom: hideNav ? 0 : 'calc(70px + env(safe-area-inset-bottom, 0px))',
           }}>
             <AnimatePresence mode="wait">
               <motion.div
@@ -83,7 +85,7 @@ function NavBar({ tabs, pathname, router }) {
       maxWidth: 480,
       display: 'flex',
       justifyContent: 'space-around',
-      padding: '8px 0 14px',
+      padding: `8px 0 calc(14px + env(safe-area-inset-bottom, 0px))`,
       background: 'rgba(7,11,7,0.92)',
       borderTop: '1px solid rgba(110,231,183,0.06)',
       backdropFilter: 'blur(20px)',
@@ -110,7 +112,13 @@ function NavTab({ tab, isActive, onClick }) {
       style={{
         background: 'none',
         border: 'none',
-        padding: '4px 16px',
+        padding: '12px 20px',
+        minWidth: 44,
+        minHeight: 44,
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
         textAlign: 'center',
         position: 'relative',
       }}
