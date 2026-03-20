@@ -6,6 +6,17 @@ import { supabase } from '../../lib/supabase'
 
 const AuthContext = createContext(null)
 
+function readCachedProfileForUser(userId) {
+  if (typeof window === 'undefined' || !userId) return null
+  try {
+    const raw = localStorage.getItem('profile')
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    if (parsed?.user_id === userId && parsed?.id) return parsed
+  } catch {}
+  return null
+}
+
 export function AuthProvider({ children }) {
   const router = useRouter()
   const [user, setUser] = useState(null)
@@ -17,7 +28,7 @@ export function AuthProvider({ children }) {
   const fetchProfile = useCallback(async (userId) => {
     if (!supabase || !userId) return null
     const timeout = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error('Profile fetch timeout')), 3000)
+      setTimeout(() => reject(new Error('Profile fetch timeout')), 8000)
     )
     try {
       const { data } = await Promise.race([
@@ -54,10 +65,11 @@ export function AuthProvider({ children }) {
           try {
             const p = await fetchProfile(u.id)
             if (cancelled) return
-            setProfile(p || null)
-            if (p) {
-              localStorage.setItem('profileId', p.id)
-              localStorage.setItem('profile', JSON.stringify(p))
+            const merged = p ?? readCachedProfileForUser(u.id)
+            setProfile(merged || null)
+            if (merged) {
+              localStorage.setItem('profileId', merged.id)
+              localStorage.setItem('profile', JSON.stringify(merged))
             } else {
               localStorage.removeItem('profileId')
               localStorage.removeItem('profile')
@@ -91,13 +103,15 @@ export function AuthProvider({ children }) {
         setProfileLoading(true)
         try {
           const p = await fetchProfile(u.id)
-          setProfile(p || null)
-          if (p) {
-            localStorage.setItem('profileId', p.id)
-            localStorage.setItem('profile', JSON.stringify(p))
-          } else {
-            localStorage.removeItem('profileId')
-            localStorage.removeItem('profile')
+          const merged = p ?? readCachedProfileForUser(u.id)
+          setProfile((prev) => {
+            if (merged != null) return merged
+            if (prev?.user_id === u.id) return prev
+            return null
+          })
+          if (merged) {
+            localStorage.setItem('profileId', merged.id)
+            localStorage.setItem('profile', JSON.stringify(merged))
           }
         } finally {
           setProfileLoading(false)
@@ -144,12 +158,19 @@ export function AuthProvider({ children }) {
   const refreshProfile = useCallback(async () => {
     if (user) {
       const p = await fetchProfile(user.id)
-      setProfile(p || null)
+      // Never wipe profile on timeout/network failure — keeps dashboard from sending users to onboarding
       if (p) {
+        setProfile(p)
         localStorage.setItem('profileId', p.id)
         localStorage.setItem('profile', JSON.stringify(p))
+        return p
       }
-      return p
+      const cached = readCachedProfileForUser(user.id)
+      if (cached) {
+        setProfile(cached)
+        return cached
+      }
+      return null
     }
     return null
   }, [user, fetchProfile])
