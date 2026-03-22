@@ -26,6 +26,27 @@ export async function POST(request) {
       mealPreferences = {},
     } = body
 
+    if (!profileId) {
+      return Response.json(
+        { success: false, error: 'Missing profileId', details: 'profileId is required' },
+        { status: 400 }
+      )
+    }
+
+    if (!profile || typeof profile !== 'object') {
+      return Response.json(
+        { success: false, error: 'Missing profile', details: 'profile object is required' },
+        { status: 400 }
+      )
+    }
+
+    if (!process.env.ANTHROPIC_API_KEY) {
+      return Response.json(
+        { success: false, error: 'Server misconfiguration', details: 'ANTHROPIC_API_KEY is not set' },
+        { status: 503 }
+      )
+    }
+
     const trainer = getTrainer(trainerId || profile?.trainer)
     const systemPrompt = buildSystemPrompt(trainer, profile) + buildOnboardingContextPrompt(onboardingContext || profile?.onboarding_context)
     const supabase = getSupabase()
@@ -67,6 +88,9 @@ export async function POST(request) {
         .eq('type', 'workout')
 
       const wp = workoutPreferences
+      const bodyGoalLine = wp.bodyGoalDescription
+        ? `\n- Physique / aesthetic goal (from user): ${wp.bodyGoalDescription}`
+        : ''
       const prefText = `
 Generate a complete workout plan for me based on my profile AND these specific preferences:${workoutActivityContext}
 
@@ -75,7 +99,7 @@ Generate a complete workout plan for me based on my profile AND these specific p
 - Training Focus: ${Array.isArray(wp.focus) ? wp.focus.join(', ') : (wp.focus || 'overall muscle building')}
 - Equipment Available: ${Array.isArray(wp.equipment) ? wp.equipment.join(', ') : (wp.equipment || 'full gym')}
 - Session Duration: ${wp.sessionDuration || '45-60 minutes'}
-- Injuries/Limitations: ${wp.injuries || 'None'}
+- Injuries/Limitations: ${wp.injuries || 'None'}${bodyGoalLine}
 `
 
       const workoutResponse = await anthropic.messages.create({
@@ -141,6 +165,9 @@ Include all days with all exercises. Make todayExercises match the first day.`,
         .eq('type', 'meal')
 
       const mp = mealPreferences
+      const mealBodyGoal = mp.bodyGoalDescription
+        ? `\n- User physique / aesthetic goal context: ${mp.bodyGoalDescription}`
+        : ''
       const prefText = `
 Generate a daily meal plan for me based on my profile AND these specific preferences:${mealActivityContext}
 
@@ -148,12 +175,12 @@ Generate a daily meal plan for me based on my profile AND these specific prefere
 - Meals Per Day: ${mp.mealsPerDay || 4}
 - Cooking Ability: ${mp.cookingAbility || 'moderate'}
 - Allergies/Dislikes: ${mp.allergies || 'None'}
-- Budget: ${mp.budget || 'moderate'}
+- Budget: ${mp.budget || 'moderate'}${mealBodyGoal}
 `
 
       const mealResponse = await anthropic.messages.create({
         model: 'claude-sonnet-4-20250514',
-        max_tokens: 1024,
+        max_tokens: 2048,
         system: systemPrompt + '\n\nIMPORTANT: You must respond ONLY with valid JSON. No text before or after. No markdown code fences.',
         messages: [{
           role: 'user',
@@ -220,7 +247,7 @@ Calculate appropriate calories and macros. Keep meals simple and practical.`,
   } catch (error) {
     console.error('Generate plan error:', error)
     return Response.json(
-      { error: 'Failed to generate plans', details: error.message },
+      { success: false, error: 'Failed to generate plans', details: error.message },
       { status: 500 }
     )
   }

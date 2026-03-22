@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { motion } from 'framer-motion'
 import { supabase } from '../../lib/supabase'
-import { trainers as trainersList, getTrainer } from '../../lib/trainers'
+import { getTrainer } from '../../lib/trainers'
 import { useAuth } from '../components/AuthProvider'
 import ProgressChart from '../components/ProgressChart'
 import WeightModal from '../components/WeightModal'
@@ -21,6 +21,16 @@ function getGreeting(name) {
   if (h >= 12 && h < 17) return { text: `Afternoon grind, ${name}`, emoji: '🔥' }
   if (h >= 17 && h < 21) return { text: `Evening session, ${name}`, emoji: '⚡' }
   return { text: `Rest up, ${name}`, emoji: '🌙' }
+}
+
+/** True only when we have a real generated plan (not just a stale/empty row). */
+function hasUsableWorkoutPlan(workoutPlanRow) {
+  const c = workoutPlanRow?.content
+  if (!c || typeof c !== 'object') return false
+  if (Array.isArray(c.days) && c.days.length > 0) return true
+  if (Array.isArray(c.todayExercises) && c.todayExercises.length > 0) return true
+  if (typeof c.name === 'string' && c.name.trim().length > 0) return true
+  return false
 }
 
 export default function Dashboard() {
@@ -54,9 +64,15 @@ export default function Dashboard() {
   }, [user, authProfile, profileLoading, router])
 
   useEffect(() => {
-    if (!profile?.id) return
-    loadPlansAndWeightLogs()
-  }, [profile?.id])
+    if (profile?.id) {
+      loadPlansAndWeightLogs()
+      return
+    }
+    // Profile object without id (bad cache): loadPlans never runs → don't spin forever
+    if (user && profile != null && !profileLoading && !profile.id) {
+      setLoading(false)
+    }
+  }, [user, profile, profile?.id, profileLoading])
 
   useEffect(() => {
     if (!profile?.id) return
@@ -75,41 +91,17 @@ export default function Dashboard() {
       .catch(() => setRecentWorkouts([]))
   }, [profile?.id])
 
-  async function loadPlansAndWeightLogs() {
-    if (!profile) return
-    const profileId = profile.id
-
-    const [plansResult, logsResult] = await Promise.all([
-      supabase
-        .from('plans')
-        .select('*')
-        .eq('profile_id', profileId)
-        .eq('active', true),
-      supabase
-        .from('weight_logs')
-        .select('*')
-        .eq('profile_id', profileId)
-        .order('created_at', { ascending: true })
-        .limit(60),
-    ])
-
-    const plansData = plansResult.data
-    const logs = logsResult.data
-
-    if (plansData) {
-      const workout = plansData.find((p) => p.type === 'workout')
-      const meal = plansData.find((p) => p.type === 'meal')
-      setPlans({ workout, meal })
-    }
-
+  function buildWeightLogsFromProfile(profileRow, logs) {
     const built = []
-    const startDate = profile?.created_at ? new Date(profile.created_at).toISOString().split('T')[0] : new Date().toISOString().split('T')[0]
+    const startDate = profileRow?.created_at
+      ? new Date(profileRow.created_at).toISOString().split('T')[0]
+      : new Date().toISOString().split('T')[0]
     if (!logs || logs.length === 0) {
-      built.push({ date: new Date().toISOString().split('T')[0], weight_kg: profile.weight_kg })
+      built.push({ date: new Date().toISOString().split('T')[0], weight_kg: profileRow.weight_kg })
     } else {
       const hasStart = logs.some((l) => ((l.logged_at || l.created_at || '') + '').split('T')[0] === startDate)
-      if (!hasStart && profile.created_at) {
-        built.push({ date: startDate, weight_kg: profile.weight_kg })
+      if (!hasStart && profileRow.created_at) {
+        built.push({ date: startDate, weight_kg: profileRow.weight_kg })
       }
       logs.forEach((l) => {
         const raw = l.logged_at || l.created_at || new Date().toISOString()
@@ -118,9 +110,63 @@ export default function Dashboard() {
       })
       built.sort((a, b) => a.date.localeCompare(b.date))
     }
-    setWeightLogs(built)
+    return built
+  }
 
-    setLoading(false)
+  async function loadPlansAndWeightLogs() {
+    if (!profile?.id) {
+      setLoading(false)
+      return
+    }
+    const profileId = profile.id
+    const profileRow = profile
+
+    try {
+      if (!supabase) {
+        setPlans({ workout: null, meal: null })
+        setWeightLogs(buildWeightLogsFromProfile(profileRow, null))
+        return
+      }
+
+      const TIMEOUT_MS = 20000
+      const queries = Promise.all([
+        supabase
+          .from('plans')
+          .select('*')
+          .eq('profile_id', profileId)
+          .eq('active', true),
+        supabase
+          .from('weight_logs')
+          .select('*')
+          .eq('profile_id', profileId)
+          .order('created_at', { ascending: true })
+          .limit(60),
+      ])
+      const timeout = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Dashboard data load timed out')), TIMEOUT_MS)
+      )
+
+      const [plansResult, logsResult] = await Promise.race([queries, timeout])
+
+      const plansData = plansResult?.data
+      const logs = logsResult?.data
+
+      if (plansData) {
+        const workout = plansData.find((p) => p.type === 'workout')
+        const meal = plansData.find((p) => p.type === 'meal')
+        setPlans({ workout, meal })
+      } else {
+        setPlans({ workout: null, meal: null })
+      }
+
+      setWeightLogs(buildWeightLogsFromProfile(profileRow, logs))
+    } catch (err) {
+      console.error('Dashboard plans/weight load failed:', err)
+      setPlans({ workout: null, meal: null })
+      setWeightLogs(buildWeightLogsFromProfile(profileRow, null))
+    } finally {
+      setLoading(false)
+    }
   }
 
   async function handleLogWeight(weightKg) {
@@ -201,10 +247,13 @@ export default function Dashboard() {
 
   const workoutContent = plans.workout?.content || null
   const mealContent = plans.meal?.content || null
+  const hasWorkoutPlan = hasUsableWorkoutPlan(plans.workout)
   const greeting = getGreeting(profile.name?.split(' ')[0] || 'there')
   const startWeight = weightLogs[0]?.weight_kg ?? profile.weight_kg
   const currentWeight = profile.weight_kg
-  const weightDiff = currentWeight - startWeight
+  const swN = typeof startWeight === 'number' && !Number.isNaN(startWeight) ? startWeight : null
+  const cwN = typeof currentWeight === 'number' && !Number.isNaN(currentWeight) ? currentWeight : null
+  const weightDiff = (cwN ?? 0) - (swN ?? 0)
   const progressDir = profile.goal === 'lose_fat' ? (weightDiff < 0 ? 'good' : 'bad') : profile.goal === 'build_muscle' ? (weightDiff > 0 ? 'good' : 'bad') : 'neutral'
 
   const cardDelays = [0, 100, 200, 300, 400, 500, 600, 700]
@@ -253,6 +302,22 @@ export default function Dashboard() {
           <p style={{ fontSize: 14, color: '#D1FAE5', fontWeight: 500, marginTop: 4 }}>
             {greeting.text} {greeting.emoji}
           </p>
+          {hasWorkoutPlan ? (
+            <p
+              style={{
+                fontSize: 13,
+                fontWeight: 600,
+                marginTop: 6,
+                color: trainer.color || '#6EE7B7',
+              }}
+            >
+              Coached by {trainer.name} {trainer.emoji}
+            </p>
+          ) : (
+            <p style={{ fontSize: 12, fontWeight: 600, marginTop: 6, color: '#6B8F7A' }}>
+              Default mode — log habits below or create your program for a full plan
+            </p>
+          )}
         </div>
         <button
           onClick={() => setTrainerModalOpen(true)}
@@ -273,7 +338,47 @@ export default function Dashboard() {
         </button>
       </motion.div>
 
-      {/* B. Streak & Quick Stats */}
+      {!hasWorkoutPlan && (
+        <div
+          className="glass"
+          style={{
+            padding: 0,
+            marginBottom: 16,
+            overflow: 'hidden',
+            border: '1px solid rgba(110,231,183,0.12)',
+            background: 'rgba(14, 20, 14, 0.92)',
+            WebkitBackfaceVisibility: 'visible',
+          }}
+        >
+          <div style={{ height: 3, background: 'linear-gradient(90deg, #10B981, #6EE7B7)' }} />
+          <div style={{ padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div>
+              <div style={{ fontSize: 15, fontWeight: 800, color: '#fff' }}>Build your workout program</div>
+              <p style={{ fontSize: 12, color: '#B8D4C4', lineHeight: 1.45, marginTop: 4 }}>
+                Everything below works now with defaults. Add a plan for personalized training & coach match.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => router.push('/plans?start=workout')}
+              style={{
+                width: '100%',
+                padding: 14,
+                borderRadius: 12,
+                border: 'none',
+                background: 'linear-gradient(135deg, #10B981, #6EE7B7)',
+                color: '#070B07',
+                fontSize: 14,
+                fontWeight: 700,
+              }}
+            >
+              Create My Program →
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* B. Streak & Quick Stats — always (placeholders until you have a plan) */}
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -284,10 +389,12 @@ export default function Dashboard() {
         <div style={{ borderTop: '2px solid #F97316', paddingTop: 8, borderRadius: 4 }}>
           <div style={{ fontSize: 10, color: '#2D5B3F', fontWeight: 600 }}>🔥 STREAK</div>
           <div style={{ fontSize: 20, fontWeight: 800, color: '#fff' }}>Day 1</div>
+          {!hasWorkoutPlan && <div style={{ fontSize: 9, color: '#4A6B58', marginTop: 2 }}>default</div>}
         </div>
         <div style={{ borderTop: '2px solid #6EE7B7', paddingTop: 8, borderRadius: 4 }}>
           <div style={{ fontSize: 10, color: '#2D5B3F', fontWeight: 600 }}>⚡ THIS WEEK</div>
           <div style={{ fontSize: 20, fontWeight: 800, color: '#fff' }}>0/4</div>
+          {!hasWorkoutPlan && <div style={{ fontSize: 9, color: '#4A6B58', marginTop: 2 }}>placeholder</div>}
         </div>
         <div style={{ borderTop: '2px solid #93C5FD', paddingTop: 8, borderRadius: 4 }}>
           <div style={{ fontSize: 10, color: '#2D5B3F', fontWeight: 600 }}>📊 PROGRESS</div>
@@ -296,7 +403,7 @@ export default function Dashboard() {
             fontWeight: 800,
             color: progressDir === 'good' ? '#6EE7B7' : progressDir === 'bad' ? '#FB7185' : '#93C5FD',
           }}>
-            {weightDiff >= 0 ? '+' : ''}{weightDiff.toFixed(1)} kg
+            {(cwN == null || swN == null) ? '—' : `${weightDiff >= 0 ? '+' : ''}${weightDiff.toFixed(1)} kg`}
           </div>
         </div>
       </motion.div>
@@ -408,7 +515,9 @@ export default function Dashboard() {
           <div className="glass" style={{ padding: 24, marginBottom: 14, border: '1px dashed rgba(110,231,183,0.2)' }}>
             <div style={{ fontSize: 28, marginBottom: 12 }}>🏋️</div>
             <div style={{ fontSize: 16, fontWeight: 700, color: '#fff', marginBottom: 8 }}>Today&apos;s Workout</div>
-            <div style={{ fontSize: 13, color: '#2D5B3F', marginBottom: 16 }}>Log your workout or create a plan</div>
+            <div style={{ fontSize: 13, color: '#94A89E', marginBottom: 16 }}>
+              {hasWorkoutPlan ? 'Log your workout or open your plan in Plans.' : 'No generated plan yet — log a session or create your program for scheduled workouts.'}
+            </div>
             {recentWorkouts.length > 0 && (
               <div style={{ marginBottom: 16 }}>
                 <div style={{ fontSize: 11, color: '#2D5B3F', fontWeight: 600, marginBottom: 6 }}>Recent</div>
@@ -486,7 +595,12 @@ export default function Dashboard() {
           >
             <div className="glass" style={{ padding: 0, overflow: 'hidden', marginBottom: 10 }}>
               <div style={{ padding: '16px 18px', borderBottom: '1px solid rgba(110,231,183,0.05)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div style={{ fontSize: 16, fontWeight: 700, color: '#fff' }}>Nutrition</div>
+                <div>
+                  <div style={{ fontSize: 16, fontWeight: 700, color: '#fff' }}>Nutrition</div>
+                  {!mealContent && (
+                    <div style={{ fontSize: 10, color: '#5A7A68', fontWeight: 600, marginTop: 2 }}>Default targets (2000 cal) · meal plan optional</div>
+                  )}
+                </div>
                 <button
                   onClick={() => setFoodLogModalOpen(true)}
                   style={{

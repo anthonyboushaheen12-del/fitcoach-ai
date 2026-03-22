@@ -4,13 +4,51 @@ import { useState, useEffect } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { motion, AnimatePresence } from 'framer-motion'
 import { supabase } from '../../lib/supabase'
-import { getTrainer } from '../../lib/trainers'
+import { getTrainer, trainers as trainersList } from '../../lib/trainers'
 import { useAuth } from '../components/AuthProvider'
 import ExerciseRow from '../components/ExerciseRow'
 import WorkoutMuscleMap from '../components/WorkoutMuscleMap'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const MEAL_EMOJIS = ['🍳', '🥗', '🍌', '🥩']
+
+const WORKOUT_QUIZ_BODY_STEP = 0
+const WORKOUT_QUIZ_STEP_COUNT = 7
+
+const LABEL_MAP = {
+  beginner: '🟢 Beginner',
+  intermediate: '🟡 Intermediate',
+  advanced: '🔴 Advanced',
+  overall_muscle: '💪 Overall Muscle',
+  legs_glutes: '🦵 Legs & Glutes',
+  upper_body: '🏋️ Upper Body',
+  arms: '💪 Arms',
+  core: '🔥 Core & Abs',
+  athletic: '⚡ Athletic Performance',
+  cardio: '🏃 Cardio & Endurance',
+  full_gym: '🏢 Full Gym',
+  home_gym: '🏠 Home Gym',
+  barbell_only: '🏋️ Barbell & Rack',
+  dumbbells_only: '💪 Dumbbells Only',
+  bodyweight: '🤸 Bodyweight',
+  '30-45': '⚡ 30-45 min',
+  '45-60': '💪 45-60 min',
+  '60-90': '🔥 60-90 min',
+  3: '3 days/week',
+  4: '4 days/week',
+  5: '5 days/week',
+  6: '6 days/week',
+}
+
+function formatWorkoutPrefLabel(value) {
+  if (value == null || value === '') return ''
+  if (Array.isArray(value)) return value.map((v) => LABEL_MAP[v] ?? String(v)).join(', ')
+  return LABEL_MAP[value] ?? String(value)
+}
+
+function hasActiveWorkoutPlan(planRows) {
+  return (planRows || []).some((p) => p.type === 'workout' && p.active)
+}
 
 const WORKOUT_STEPS = [
   {
@@ -162,6 +200,14 @@ export default function Plans() {
   const [generating, setGenerating] = useState(false)
   const [genError, setGenError] = useState(null)
   const [direction, setDirection] = useState(1)
+  const [bodyGoalImageBase64, setBodyGoalImageBase64] = useState(null)
+  const [bodyGoalImageMediaType, setBodyGoalImageMediaType] = useState('image/jpeg')
+  const [bodyGoalPreviewUrl, setBodyGoalPreviewUrl] = useState(null)
+  const [bodyGoalDescription, setBodyGoalDescription] = useState('')
+  const [recommendLoading, setRecommendLoading] = useState(false)
+  const [trainerRecommendation, setTrainerRecommendation] = useState(null)
+  const [selectedTrainerId, setSelectedTrainerId] = useState('bro')
+  const [pendingGenerateType, setPendingGenerateType] = useState(null)
 
   useEffect(() => {
     if (!user) { router.push('/'); return }
@@ -170,7 +216,10 @@ export default function Plans() {
 
   useEffect(() => {
     const start = searchParams.get('start')
-    if (start === 'workout') setView('workout-quiz')
+    if (start === 'workout') {
+      setWorkoutQuizStep(WORKOUT_QUIZ_BODY_STEP)
+      setView('workout-quiz')
+    }
     if (start === 'meal') setView('meal-quiz')
   }, [searchParams])
 
@@ -213,66 +262,190 @@ export default function Plans() {
     setter(key, next)
   }
 
-  async function generateWorkoutPlan() {
+  function clearBodyGoalUpload() {
+    setBodyGoalImageBase64(null)
+    setBodyGoalPreviewUrl(null)
+    setBodyGoalDescription('')
+    setBodyGoalImageMediaType('image/jpeg')
+  }
+
+  function handleBodyGoalFile(e) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const ok = ['image/jpeg', 'image/png', 'image/webp'].includes(file.type)
+    if (!ok) {
+      setGenError('Please use JPG, PNG, or WebP')
+      return
+    }
+    const reader = new FileReader()
+    reader.onload = (ev) => {
+      const dataUrl = ev.target?.result
+      if (typeof dataUrl !== 'string') return
+      setBodyGoalPreviewUrl(dataUrl)
+      const comma = dataUrl.indexOf(',')
+      setBodyGoalImageBase64(comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl)
+      setBodyGoalImageMediaType(file.type || 'image/jpeg')
+    }
+    reader.readAsDataURL(file)
+    e.target.value = ''
+  }
+
+  async function fetchTrainerRecommendation(mealOnly) {
     if (!profile) return
-    setGenerating(true)
+    setRecommendLoading(true)
     setGenError(null)
     try {
-      const res = await fetch('/api/generate-plan', {
+      const res = await fetch('/api/recommend-trainer', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          profileId: profile.id,
           profile,
-          trainerId: profile.trainer,
-          onboardingContext: profile?.onboarding_context,
-          type: 'workout',
-          workoutPreferences: workoutPrefs,
+          workoutPreferences: mealOnly ? {} : workoutPrefs,
+          bodyGoalImage: bodyGoalImageBase64 || undefined,
+          bodyGoalImageMediaType: bodyGoalImageBase64 ? bodyGoalImageMediaType : undefined,
+          bodyGoalDescription: bodyGoalDescription?.trim() || undefined,
+          mealOnlyContext: !!mealOnly,
         }),
       })
-      const data = await res.json()
-      if (data.success) {
-        await Promise.all([loadPlans(profile.id), refreshProfile()])
-        setView('overview')
-        setWorkoutQuizStep(0)
-        router.push('/dashboard')
-      } else throw new Error(data.error || 'Failed')
+      const data = await res.json().catch(() => ({}))
+      const rec = {
+        trainerId: data.trainerId || 'bro',
+        trainerName: data.trainerName,
+        trainerEmoji: data.trainerEmoji,
+        reasoning: data.reasoning,
+        confidence: data.confidence,
+        alternativeId: data.alternativeId,
+        alternativeReason: data.alternativeReason,
+      }
+      setTrainerRecommendation(rec)
+      setSelectedTrainerId(rec.trainerId)
+      setPendingGenerateType(mealOnly ? 'meal' : 'workout')
+      setView('trainer-recommend')
     } catch (err) {
-      setGenError(err?.message || 'Failed to generate plan')
+      setGenError(err?.message || 'Could not analyze goals')
+      const rec = {
+        trainerId: 'bro',
+        trainerName: 'The Gym Legends',
+        trainerEmoji: '💪',
+        reasoning: 'We matched you with The Gym Legends — a solid default while we finish setup.',
+        confidence: 'medium',
+        alternativeId: 'scientist',
+        alternativeReason: 'For a more data-driven style.',
+      }
+      setTrainerRecommendation(rec)
+      setSelectedTrainerId('bro')
+      setPendingGenerateType(mealOnly ? 'meal' : 'workout')
+      setView('trainer-recommend')
+    } finally {
+      setRecommendLoading(false)
+    }
+  }
+
+  async function runGenerateWorkoutApi(trainerId) {
+    if (!profile) return
+    const workoutPreferences = {
+      ...workoutPrefs,
+      bodyGoalDescription: bodyGoalDescription?.trim() || undefined,
+    }
+    const res = await fetch('/api/generate-plan', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        profileId: profile.id,
+        profile: { ...profile, trainer: trainerId },
+        trainerId,
+        onboardingContext: profile?.onboarding_context,
+        type: 'workout',
+        workoutPreferences,
+      }),
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok || !data.success) {
+      throw new Error(
+        data.error || data.details || `Plan generation failed (${res.status}). Try again.`
+      )
+    }
+    await Promise.all([loadPlans(profile.id), refreshProfile()])
+    setView('overview')
+    setWorkoutQuizStep(WORKOUT_QUIZ_BODY_STEP)
+    clearBodyGoalUpload()
+    setTrainerRecommendation(null)
+    setPendingGenerateType(null)
+    router.push('/dashboard')
+  }
+
+  async function runGenerateMealApi(trainerId) {
+    if (!profile) return
+    const mealPreferences = {
+      ...mealPrefs,
+      bodyGoalDescription: bodyGoalDescription?.trim() || undefined,
+    }
+    const res = await fetch('/api/generate-plan', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        profileId: profile.id,
+        profile: { ...profile, trainer: trainerId },
+        trainerId,
+        onboardingContext: profile?.onboarding_context,
+        type: 'meal',
+        mealPreferences,
+      }),
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok || !data.success) {
+      throw new Error(
+        data.error || data.details || `Meal plan generation failed (${res.status}). Try again.`
+      )
+    }
+    await Promise.all([loadPlans(profile.id), refreshProfile()])
+    setView('overview')
+    setMealQuizStep(0)
+    setTrainerRecommendation(null)
+    setPendingGenerateType(null)
+    router.push('/dashboard')
+  }
+
+  async function confirmTrainerAndGenerate() {
+    if (!profile || !selectedTrainerId) return
+    setGenerating(true)
+    setGenError(null)
+    try {
+      await supabase.from('profiles').update({ trainer: selectedTrainerId }).eq('id', profile.id)
+      await refreshProfile()
+      const tid = selectedTrainerId
+      if (pendingGenerateType === 'meal') {
+        await runGenerateMealApi(tid)
+      } else {
+        await runGenerateWorkoutApi(tid)
+      }
+    } catch (err) {
+      setGenError(err?.message || 'Something went wrong. Try again.')
     } finally {
       setGenerating(false)
     }
   }
 
-  async function generateMealPlan() {
+  async function onWorkoutQuizGenerateClick() {
     if (!profile) return
-    setGenerating(true)
-    setGenError(null)
-    try {
-      const res = await fetch('/api/generate-plan', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          profileId: profile.id,
-          profile,
-          trainerId: profile.trainer,
-          onboardingContext: profile?.onboarding_context,
-          type: 'meal',
-          mealPreferences: mealPrefs,
-        }),
-      })
-      const data = await res.json()
-      if (data.success) {
-        await Promise.all([loadPlans(profile.id), refreshProfile()])
-        setView('overview')
-        setMealQuizStep(0)
-        router.push('/dashboard')
-      } else throw new Error(data.error || 'Failed')
-    } catch (err) {
-      setGenError(err?.message || 'Failed to generate plan')
-    } finally {
-      setGenerating(false)
+    await fetchTrainerRecommendation(false)
+  }
+
+  async function onMealQuizGenerateClick() {
+    if (!profile) return
+    if (hasActiveWorkoutPlan(plans)) {
+      setGenerating(true)
+      setGenError(null)
+      try {
+        await runGenerateMealApi(profile.trainer || 'bro')
+      } catch (err) {
+        setGenError(err?.message || 'Failed to generate meal plan')
+      } finally {
+        setGenerating(false)
+      }
+      return
     }
+    await fetchTrainerRecommendation(true)
   }
 
   if (loading || !profile) {
@@ -328,30 +501,124 @@ export default function Plans() {
     </motion.button>
   )
 
+  if (view === 'trainer-recommend' && trainerRecommendation) {
+    const picked = getTrainer(selectedTrainerId)
+    const others = trainersList.filter((t) => t.id !== selectedTrainerId)
+    return (
+      <div style={{ padding: '18px 20px 24px' }}>
+        <button
+          type="button"
+          onClick={() => {
+            setView(pendingGenerateType === 'meal' ? 'meal-quiz' : 'workout-quiz')
+            if (pendingGenerateType !== 'meal') setWorkoutQuizStep(WORKOUT_QUIZ_STEP_COUNT - 1)
+            else setMealQuizStep(MEAL_STEPS.length - 1)
+          }}
+          style={{ background: 'none', border: 'none', color: '#6EE7B7', fontSize: 14, fontWeight: 600, marginBottom: 16 }}
+        >
+          ← Back
+        </button>
+        <div className="glass" style={{ padding: 22, textAlign: 'center', border: '1px solid rgba(110,231,183,0.12)', borderTop: `3px solid ${picked.color}` }}>
+          <div style={{ fontSize: 14, color: '#2D5B3F', marginBottom: 12 }}>Based on your goals, we recommend:</div>
+          <div style={{ fontSize: 56, lineHeight: 1, marginBottom: 8 }}>{picked.emoji}</div>
+          <div style={{ fontSize: 22, fontWeight: 800, color: picked.color }}>{picked.name}</div>
+          <div style={{ fontSize: 13, color: '#D1FAE5', marginTop: 6, marginBottom: 14 }}>{picked.style}</div>
+          <p style={{ fontSize: 14, color: '#E2FBE8', lineHeight: 1.55, textAlign: 'left', marginBottom: 20 }}>
+            {trainerRecommendation.reasoning}
+          </p>
+          {genError && <div style={{ color: '#FB7185', fontSize: 13, marginBottom: 12 }}>{genError}</div>}
+          <button
+            type="button"
+            onClick={confirmTrainerAndGenerate}
+            disabled={generating}
+            style={{
+              width: '100%',
+              padding: 16,
+              borderRadius: 14,
+              border: 'none',
+              background: 'linear-gradient(135deg, #10B981, #6EE7B7)',
+              color: '#070B07',
+              fontSize: 15,
+              fontWeight: 700,
+              opacity: generating ? 0.65 : 1,
+              marginBottom: 20,
+            }}
+          >
+            {generating
+              ? `${picked.emoji} ${pendingGenerateType === 'meal' ? 'Designing your nutrition' : 'Building your workout'}...`
+              : `Train with ${picked.name}`}
+          </button>
+          <div style={{ fontSize: 12, color: '#2D5B3F', marginBottom: 10 }}>Or choose a different coach:</div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, justifyContent: 'center' }}>
+            {others.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => setSelectedTrainerId(t.id)}
+                style={{
+                  padding: '8px 12px',
+                  borderRadius: 999,
+                  border: selectedTrainerId === t.id ? `2px solid ${t.color}` : '1px solid rgba(110,231,183,0.15)',
+                  background: selectedTrainerId === t.id ? `${t.color}22` : 'rgba(14,20,14,0.5)',
+                  color: selectedTrainerId === t.id ? t.color : '#D1FAE5',
+                  fontSize: 12,
+                  fontWeight: 600,
+                }}
+              >
+                {t.emoji} {t.name.split(' ').slice(-2).join(' ')}
+              </button>
+            ))}
+          </div>
+          {trainerRecommendation.alternativeReason && (
+            <p style={{ fontSize: 11, color: '#1F4030', marginTop: 14, lineHeight: 1.45 }}>
+              Also consider {getTrainer(trainerRecommendation.alternativeId || 'scientist').name}: {trainerRecommendation.alternativeReason}
+            </p>
+          )}
+        </div>
+      </div>
+    )
+  }
+
   if (view === 'workout-quiz') {
     const steps = WORKOUT_STEPS
-    const step = steps[workoutQuizStep]
-    const isLast = workoutQuizStep === steps.length - 1
-    const isFirst = workoutQuizStep === 0
-    const canNext = step.textarea
+    const onBodyStep = workoutQuizStep === WORKOUT_QUIZ_BODY_STEP
+    const stepIdx = workoutQuizStep - 1
+    const step = !onBodyStep ? steps[stepIdx] : null
+    const isLast = workoutQuizStep === WORKOUT_QUIZ_STEP_COUNT - 1
+    const isFirst = workoutQuizStep === WORKOUT_QUIZ_BODY_STEP
+    const canNext = onBodyStep
       ? true
-      : step.multi
-        ? (workoutPrefs[step.id]?.length || 0) > 0
-        : workoutPrefs[step.id] != null && workoutPrefs[step.id] !== ''
+      : step.textarea
+        ? true
+        : step.multi
+          ? (workoutPrefs[step.id]?.length || 0) > 0
+          : workoutPrefs[step.id] != null && workoutPrefs[step.id] !== ''
+
+    if (recommendLoading) {
+      return (
+        <div style={{ padding: '80px 24px', textAlign: 'center' }}>
+          <motion.div animate={{ scale: [1, 1.08, 1] }} transition={{ duration: 1.2, repeat: Infinity }} style={{ fontSize: 48, marginBottom: 16 }}>
+            🎯
+          </motion.div>
+          <div style={{ fontSize: 16, fontWeight: 600, color: '#6EE7B7' }}>Analyzing your goals...</div>
+          <div style={{ fontSize: 13, color: '#2D5B3F', marginTop: 8 }}>Finding your best AI coach match</div>
+        </div>
+      )
+    }
 
     return (
       <div style={{ padding: '18px 20px 0' }}>
         <div style={{ marginBottom: 20 }}>
           <button
-            onClick={() => isFirst ? setView('overview') : setWorkoutQuizStep(workoutQuizStep - 1)}
+            type="button"
+            onClick={() => (isFirst ? setView('overview') : setWorkoutQuizStep(workoutQuizStep - 1))}
             style={{ background: 'none', border: 'none', color: '#6EE7B7', fontSize: 14, fontWeight: 600 }}
           >
             ← Back
           </button>
           <h1 style={{ fontSize: 22, fontWeight: 800, color: '#fff', marginTop: 8 }}>Workout Plan</h1>
         </div>
-        <div style={{ display: 'flex', gap: 6, marginBottom: 24 }}>
-          {steps.map((_, i) => (
+        <div style={{ display: 'flex', gap: 4, marginBottom: 24 }}>
+          {Array.from({ length: WORKOUT_QUIZ_STEP_COUNT }).map((_, i) => (
             <div key={i} style={{ flex: 1, height: 4, borderRadius: 100, background: 'rgba(110,231,183,0.08)', overflow: 'hidden' }}>
               <motion.div
                 animate={{ width: i <= workoutQuizStep ? '100%' : 0 }}
@@ -362,7 +629,92 @@ export default function Plans() {
           ))}
         </div>
         <AnimatePresence mode="wait">
-          {step.textarea ? (
+          {onBodyStep ? (
+            <motion.div key="body-goal" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
+              <h2 style={{ fontSize: 18, fontWeight: 700, color: '#fff', marginBottom: 6 }}>
+                Upload a physique you&apos;d like to work toward
+              </h2>
+              <p style={{ fontSize: 13, color: '#2D5B3F', marginBottom: 16, lineHeight: 1.5 }}>
+                This helps us understand your aesthetic goals and match you with the right coaching style
+              </p>
+              <label
+                style={{
+                  display: 'block',
+                  minHeight: 200,
+                  borderRadius: 16,
+                  border: '2px dashed rgba(110,231,183,0.25)',
+                  background: 'rgba(14,20,14,0.45)',
+                  cursor: 'pointer',
+                  overflow: 'hidden',
+                  position: 'relative',
+                }}
+              >
+                <input type="file" accept="image/jpeg,image/png,image/webp" style={{ display: 'none' }} onChange={handleBodyGoalFile} />
+                {bodyGoalPreviewUrl ? (
+                  <>
+                    <img src={bodyGoalPreviewUrl} alt="" style={{ width: '100%', height: 200, objectFit: 'cover' }} />
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.preventDefault()
+                        clearBodyGoalUpload()
+                      }}
+                      style={{
+                        position: 'absolute',
+                        top: 8,
+                        right: 8,
+                        padding: '6px 10px',
+                        borderRadius: 10,
+                        border: 'none',
+                        background: 'rgba(0,0,0,0.65)',
+                        color: '#fff',
+                        fontSize: 12,
+                        fontWeight: 600,
+                      }}
+                    >
+                      ✕ Remove
+                    </button>
+                  </>
+                ) : (
+                  <div style={{ height: 200, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+                    <span style={{ fontSize: 40 }}>📷</span>
+                    <span style={{ fontSize: 14, color: '#6EE7B7', fontWeight: 600 }}>Tap to upload inspiration photo</span>
+                    <span style={{ fontSize: 12, color: '#2D5B3F' }}>JPG, PNG, or WebP</span>
+                  </div>
+                )}
+              </label>
+              {bodyGoalPreviewUrl && (
+                <div style={{ marginTop: 14 }}>
+                  <label style={{ fontSize: 12, color: '#2D5B3F', fontWeight: 600, display: 'block', marginBottom: 6 }}>
+                    Describe what you like about this physique (optional)
+                  </label>
+                  <textarea
+                    placeholder="e.g. Lean with visible abs, broad shoulders, athletic build"
+                    value={bodyGoalDescription}
+                    onChange={(e) => setBodyGoalDescription(e.target.value)}
+                    rows={3}
+                    style={{ ...inputStyle, resize: 'vertical' }}
+                  />
+                </div>
+              )}
+              <button
+                type="button"
+                onClick={() => setWorkoutQuizStep(1)}
+                style={{
+                  marginTop: 16,
+                  background: 'none',
+                  border: 'none',
+                  color: '#2D5B3F',
+                  fontSize: 13,
+                  fontWeight: 600,
+                  width: '100%',
+                  textAlign: 'center',
+                }}
+              >
+                Skip this step
+              </button>
+            </motion.div>
+          ) : step.textarea ? (
             <motion.div key={step.id} initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
               <h2 style={{ fontSize: 18, fontWeight: 700, color: '#fff', marginBottom: 8 }}>{step.q}</h2>
               <textarea
@@ -374,6 +726,7 @@ export default function Plans() {
               />
               <div style={{ display: 'flex', gap: 10 }}>
                 <button
+                  type="button"
                   onClick={() => updateWorkoutPref(step.id, '')}
                   style={{ padding: '10px 16px', borderRadius: 12, border: '1px solid rgba(110,231,183,0.2)', background: 'transparent', color: '#2D5B3F', fontSize: 13 }}
                 >
@@ -405,19 +758,27 @@ export default function Plans() {
         {isLast ? (
           <div style={{ marginTop: 24 }}>
             <div className="glass" style={{ padding: 16, marginBottom: 16 }}>
-              <div style={{ fontSize: 14, color: '#6EE7B7', marginBottom: 8 }}>{trainer.name} will create your program</div>
+              <div style={{ fontSize: 14, color: '#6EE7B7', marginBottom: 8 }}>We&apos;ll match you with a coach, then build your program</div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                {Object.entries(workoutPrefs).filter(([k, v]) => v && (Array.isArray(v) ? v.length : true)).map(([k, v]) => (
-                  <span key={k} style={{ padding: '6px 12px', borderRadius: 20, background: 'rgba(110,231,183,0.15)', fontSize: 12, color: '#6EE7B7' }}>
-                    {Array.isArray(v) ? v.join(', ') : v}
+                {Object.entries(workoutPrefs)
+                  .filter(([k, v]) => v && (Array.isArray(v) ? v.length : true))
+                  .map(([k, v]) => (
+                    <span key={k} style={{ padding: '6px 12px', borderRadius: 20, background: 'rgba(110,231,183,0.15)', fontSize: 12, color: '#6EE7B7' }}>
+                      {formatWorkoutPrefLabel(v)}
+                    </span>
+                  ))}
+                {bodyGoalDescription?.trim() && (
+                  <span style={{ padding: '6px 12px', borderRadius: 20, background: 'rgba(110,231,183,0.15)', fontSize: 12, color: '#6EE7B7' }}>
+                    Goal image note
                   </span>
-                ))}
+                )}
               </div>
             </div>
             {genError && <div style={{ color: '#FB7185', fontSize: 13, marginBottom: 12 }}>{genError}</div>}
             <button
-              onClick={generateWorkoutPlan}
-              disabled={generating}
+              type="button"
+              onClick={onWorkoutQuizGenerateClick}
+              disabled={generating || recommendLoading}
               style={{
                 width: '100%',
                 padding: 16,
@@ -427,14 +788,15 @@ export default function Plans() {
                 color: '#070B07',
                 fontSize: 15,
                 fontWeight: 700,
-                opacity: generating ? 0.6 : 1,
+                opacity: generating || recommendLoading ? 0.6 : 1,
               }}
             >
-              {generating ? `${trainer.emoji} Building your workout...` : 'Generate My Workout Plan'}
+              Generate My Workout Plan
             </button>
           </div>
         ) : (
           <button
+            type="button"
             onClick={() => setWorkoutQuizStep(workoutQuizStep + 1)}
             disabled={!canNext}
             style={{
@@ -466,6 +828,18 @@ export default function Plans() {
       : step.multi
         ? (mealPrefs[step.id]?.length || 0) > 0
         : mealPrefs[step.id] != null && mealPrefs[step.id] !== ''
+
+    if (recommendLoading) {
+      return (
+        <div style={{ padding: '80px 24px', textAlign: 'center' }}>
+          <motion.div animate={{ scale: [1, 1.08, 1] }} transition={{ duration: 1.2, repeat: Infinity }} style={{ fontSize: 48, marginBottom: 16 }}>
+            🎯
+          </motion.div>
+          <div style={{ fontSize: 16, fontWeight: 600, color: '#FB923C' }}>Analyzing your goals...</div>
+          <div style={{ fontSize: 13, color: '#2D5B3F', marginTop: 8 }}>Finding your best AI coach match</div>
+        </div>
+      )
+    }
 
     return (
       <div style={{ padding: '18px 20px 0' }}>
@@ -531,7 +905,11 @@ export default function Plans() {
         {isLast ? (
           <div style={{ marginTop: 24 }}>
             <div className="glass" style={{ padding: 16, marginBottom: 16 }}>
-              <div style={{ fontSize: 14, color: '#F97316', marginBottom: 8 }}>{trainer.name} will design your nutrition</div>
+              <div style={{ fontSize: 14, color: '#F97316', marginBottom: 8 }}>
+                {hasActiveWorkoutPlan(plans)
+                  ? `${trainer.name} will design your nutrition`
+                  : 'We may match a coach first, then design your nutrition'}
+              </div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                 {Object.entries(mealPrefs).filter(([k, v]) => v && (Array.isArray(v) ? v.length : true)).map(([k, v]) => (
                   <span key={k} style={{ padding: '6px 12px', borderRadius: 20, background: 'rgba(249,115,22,0.15)', fontSize: 12, color: '#FB923C' }}>
@@ -542,8 +920,9 @@ export default function Plans() {
             </div>
             {genError && <div style={{ color: '#FB7185', fontSize: 13, marginBottom: 12 }}>{genError}</div>}
             <button
-              onClick={generateMealPlan}
-              disabled={generating}
+              type="button"
+              onClick={onMealQuizGenerateClick}
+              disabled={generating || recommendLoading}
               style={{
                 width: '100%',
                 padding: 16,
@@ -553,7 +932,7 @@ export default function Plans() {
                 color: '#fff',
                 fontSize: 15,
                 fontWeight: 700,
-                opacity: generating ? 0.6 : 1,
+                opacity: generating || recommendLoading ? 0.6 : 1,
               }}
             >
               {generating ? `${trainer.emoji} Designing your nutrition...` : 'Generate My Meal Plan'}
@@ -598,7 +977,11 @@ export default function Plans() {
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
             <span style={{ fontSize: 14, color: '#6EE7B7', fontWeight: 600 }}>Workout</span>
             <button
-              onClick={() => setView('workout-quiz')}
+              type="button"
+              onClick={() => {
+                setWorkoutQuizStep(WORKOUT_QUIZ_BODY_STEP)
+                setView('workout-quiz')
+              }}
               style={{ padding: '6px 12px', borderRadius: 10, border: '1px solid rgba(110,231,183,0.3)', background: 'transparent', color: '#6EE7B7', fontSize: 12, fontWeight: 600 }}
             >
               Regenerate Workout
@@ -682,7 +1065,10 @@ export default function Plans() {
           <div style={{ fontSize: 16, fontWeight: 700, color: '#fff', marginBottom: 8 }}>Create Your Workout Plan</div>
           <div style={{ fontSize: 13, color: '#2D5B3F', marginBottom: 16 }}>Answer a few questions and your AI trainer will build a personalized program</div>
           <button
-            onClick={() => setView('workout-quiz')}
+            onClick={() => {
+              setWorkoutQuizStep(WORKOUT_QUIZ_BODY_STEP)
+              setView('workout-quiz')
+            }}
             style={{
               width: '100%',
               padding: 16,

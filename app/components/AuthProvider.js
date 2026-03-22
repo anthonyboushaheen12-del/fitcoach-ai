@@ -75,7 +75,8 @@ export function AuthProvider({ children }) {
               localStorage.removeItem('profile')
             }
           } finally {
-            if (!cancelled) setProfileLoading(false)
+            // Always clear — if we skip when cancelled, Strict Mode / fast unmount leaves profileLoading stuck true forever
+            setProfileLoading(false)
           }
         } else {
           setProfile(null)

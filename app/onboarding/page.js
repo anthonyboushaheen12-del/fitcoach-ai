@@ -4,10 +4,9 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { motion, AnimatePresence } from 'framer-motion'
 import { supabase } from '../../lib/supabase'
-import { trainers, getTrainer } from '../../lib/trainers'
 import { useAuth } from '../components/AuthProvider'
 
-const steps = ['basics', 'body', 'goals', 'trainer']
+const steps = ['basics', 'body', 'goals']
 
 export default function OnboardingPage() {
   const router = useRouter()
@@ -23,7 +22,6 @@ export default function OnboardingPage() {
     height_cm: '',
     activity: '',
     goal: '',
-    trainer: 'bro',
     units: 'metric',
   })
 
@@ -34,7 +32,7 @@ export default function OnboardingPage() {
       router.push('/')
       return
     }
-    if (!profileLoading && profile) {
+    if (!profileLoading && profile?.id) {
       router.replace('/dashboard')
     }
   }, [user, profile, profileLoading, router])
@@ -54,7 +52,6 @@ export default function OnboardingPage() {
     if (step === 0) return form.name && form.age && form.gender
     if (step === 1) return form.weight_kg && form.height_cm && form.activity
     if (step === 2) return form.goal && String(form.goal).trim().length >= 10
-    if (step === 3) return form.trainer
     return false
   }
 
@@ -76,7 +73,7 @@ export default function OnboardingPage() {
         height_cm: typeof heightVal === 'number' && !Number.isNaN(heightVal) && heightVal > 0 ? heightVal : null,
         activity: String(form.activity || ''),
         goal: goalText || 'General fitness',
-        trainer: String(form.trainer || 'bro'),
+        trainer: 'bro',
         units: String(form.units || 'metric'),
       }
       if (insertPayload.weight_kg === null || insertPayload.height_cm === null) {
@@ -323,51 +320,6 @@ export default function OnboardingPage() {
             </div>
           </motion.div>
         )}
-        {step === 3 && (
-          <motion.div
-            key="step3"
-            custom={direction}
-            initial={{ opacity: 0, x: direction > 0 ? 80 : -80 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: direction > 0 ? -80 : 80 }}
-            transition={{ duration: 0.25 }}
-          >
-            <h2 style={{ fontSize: 22, fontWeight: 700, color: '#fff', marginBottom: 4 }}>Pick your trainer</h2>
-            <p style={{ color: '#2D5B3F', fontSize: 14, marginBottom: 24 }}>You can switch anytime</p>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {trainers.map((t, i) => (
-                <motion.button
-                  key={t.id}
-                  initial={{ opacity: 0, y: 12 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: i * 0.05, duration: 0.25 }}
-                  onClick={() => update('trainer', t.id)}
-                  style={{
-                    padding: '18px 16px',
-                    background: form.trainer === t.id ? `linear-gradient(135deg, ${t.color}15, ${t.color}08)` : 'rgba(14,20,14,0.55)',
-                    border: form.trainer === t.id ? `2px solid ${t.color}50` : '1px solid rgba(110,231,183,0.07)',
-                    borderRadius: 16,
-                    textAlign: 'left',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 14,
-                    backdropFilter: 'blur(24px)',
-                    transition: 'all 0.2s ease',
-                  }}
-                >
-                  <div style={{ width: 50, height: 50, borderRadius: 14, background: `${t.color}15`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 26, flexShrink: 0 }}>{t.emoji}</div>
-                  <div>
-                    <div style={{ fontSize: 16, fontWeight: 700, color: form.trainer === t.id ? t.color : '#D1FAE5' }}>{t.name}</div>
-                    <div style={{ fontSize: 12, color: form.trainer === t.id ? '#6EE7B7' : '#2D5B3F', marginTop: 2 }}>{t.style}</div>
-                  </div>
-                  {form.trainer === t.id && (
-                    <div style={{ marginLeft: 'auto', width: 8, height: 8, borderRadius: '50%', background: t.color, boxShadow: `0 0 10px ${t.color}60` }} />
-                  )}
-                </motion.button>
-              ))}
-            </div>
-          </motion.div>
-        )}
       </AnimatePresence>
 
       <div style={{ display: 'flex', gap: 10, marginTop: 32 }}>
@@ -399,18 +351,16 @@ export default function OnboardingPage() {
             borderRadius: 14,
             border: 'none',
             background: canNext()
-              ? step === steps.length - 1
-                ? 'linear-gradient(135deg, #F97316, #EC4899)'
-                : 'linear-gradient(135deg, #10B981, #6EE7B7)'
+              ? 'linear-gradient(135deg, #10B981, #6EE7B7)'
               : 'rgba(110,231,183,0.08)',
-            color: canNext() ? (step === steps.length - 1 ? '#fff' : '#070B07') : '#1A3326',
+            color: canNext() ? '#070B07' : '#1A3326',
             fontSize: 15,
             fontWeight: 700,
             boxShadow: canNext() ? '0 4px 20px rgba(16,185,129,0.25)' : 'none',
             opacity: loading ? 0.6 : 1,
           }}
         >
-          {loading ? 'Setting up...' : step === steps.length - 1 ? 'Start Training 🔥' : 'Continue →'}
+          {loading ? 'Setting up...' : step === steps.length - 1 ? "Let's Go →" : 'Continue →'}
         </motion.button>
       </div>
     </div>
