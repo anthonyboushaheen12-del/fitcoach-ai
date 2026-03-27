@@ -48,6 +48,7 @@ export default function Dashboard() {
   const [recentWorkouts, setRecentWorkouts] = useState([])
   const [analysisLoading, setAnalysisLoading] = useState(false)
   const [analysisResult, setAnalysisResult] = useState(null)
+  const [chartHeight, setChartHeight] = useState(160)
 
   const profile = authProfile
   const trainer = profile ? getTrainer(profile.trainer) : getTrainer('bro')
@@ -90,6 +91,14 @@ export default function Dashboard() {
       .then((data) => setRecentWorkouts(data.workouts || []))
       .catch(() => setRecentWorkouts([]))
   }, [profile?.id])
+
+  useEffect(() => {
+    const mq = window.matchMedia('(min-width: 1024px)')
+    const apply = () => setChartHeight(mq.matches ? 250 : 160)
+    apply()
+    mq.addEventListener('change', apply)
+    return () => mq.removeEventListener('change', apply)
+  }, [])
 
   function buildWeightLogsFromProfile(profileRow, logs) {
     const built = []
@@ -245,10 +254,98 @@ export default function Dashboard() {
     )
   }
 
+  const hasAnyPlan = !!(plans.workout || plans.meal)
+  const greeting = getGreeting(profile.name?.split(' ')[0] || 'there')
+
+  if (!hasAnyPlan) {
+    return (
+      <div className="app-container" style={{ paddingTop: 24, paddingBottom: 32 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+          <div>
+            <h1 style={{ fontSize: 26, fontWeight: 800, letterSpacing: -0.8 }}>
+              <span style={{ color: '#6EE7B7' }}>Fit</span>
+              <span style={{ color: '#fff' }}>Coach</span>
+              <span className="gradient-accent" style={{ fontSize: 13, fontWeight: 600, marginLeft: 6 }}>AI</span>
+            </h1>
+            <p style={{ fontSize: 13, color: '#A7C4B8', fontWeight: 500, marginTop: 6 }}>
+              {greeting.text} {greeting.emoji}
+            </p>
+          </div>
+        </div>
+
+        <div
+          className="glass"
+          style={{
+            padding: 0,
+            marginBottom: 24,
+            overflow: 'hidden',
+            background: 'rgba(14, 20, 14, 0.92)',
+            WebkitBackfaceVisibility: 'visible',
+            border: '1px solid rgba(110,231,183,0.12)',
+          }}
+        >
+          <div style={{ height: 3, background: 'linear-gradient(90deg, #10B981, #6EE7B7, #F97316, #EC4899)' }} />
+          <div style={{ padding: '32px 24px', textAlign: 'center' }}>
+            <div style={{ fontSize: 48, marginBottom: 12 }}>🎯</div>
+            <h2 style={{ fontSize: 22, fontWeight: 800, color: '#fff', marginBottom: 8 }}>
+              Welcome to FitCoach AI
+            </h2>
+            <p
+              style={{
+                fontSize: 14,
+                color: '#B8D4C4',
+                lineHeight: 1.6,
+                marginBottom: 24,
+                maxWidth: 400,
+                margin: '0 auto 24px',
+              }}
+            >
+              Let&apos;s build your personalized training program. Answer a few questions and we&apos;ll match you with the perfect AI coach.
+            </p>
+            <button
+              type="button"
+              onClick={() => router.push('/plans?start=workout')}
+              style={{
+                width: '100%',
+                maxWidth: 320,
+                margin: '0 auto',
+                display: 'block',
+                padding: 16,
+                borderRadius: 14,
+                border: 'none',
+                background: 'linear-gradient(135deg, #10B981, #6EE7B7)',
+                color: '#070B07',
+                fontSize: 16,
+                fontWeight: 700,
+                boxShadow: '0 4px 20px rgba(16,185,129,0.25)',
+                cursor: 'pointer',
+              }}
+            >
+              Create My Program →
+            </button>
+          </div>
+        </div>
+
+        <div className="card-grid">
+          {[
+            { emoji: '🏋️', title: 'Personalized Workouts', desc: 'Tailored to your goals, experience, and equipment' },
+            { emoji: '🥗', title: 'Smart Nutrition', desc: 'Meal plans designed for your preferences and dietary needs' },
+            { emoji: '💬', title: 'AI Coaching', desc: 'Chat with your trainer anytime for advice and motivation' },
+          ].map((card, i) => (
+            <div key={i} className="glass" style={{ padding: '20px 18px', background: 'rgba(14, 20, 14, 0.92)', WebkitBackfaceVisibility: 'visible' }}>
+              <div style={{ fontSize: 28, marginBottom: 8 }}>{card.emoji}</div>
+              <div style={{ fontSize: 15, fontWeight: 700, color: '#D1FAE5', marginBottom: 4 }}>{card.title}</div>
+              <div style={{ fontSize: 12, color: '#8BAFA0', lineHeight: 1.5 }}>{card.desc}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    )
+  }
+
   const workoutContent = plans.workout?.content || null
   const mealContent = plans.meal?.content || null
   const hasWorkoutPlan = hasUsableWorkoutPlan(plans.workout)
-  const greeting = getGreeting(profile.name?.split(' ')[0] || 'there')
   const startWeight = weightLogs[0]?.weight_kg ?? profile.weight_kg
   const currentWeight = profile.weight_kg
   const swN = typeof startWeight === 'number' && !Number.isNaN(startWeight) ? startWeight : null
@@ -259,7 +356,7 @@ export default function Dashboard() {
   const cardDelays = [0, 100, 200, 300, 400, 500, 600, 700]
 
   return (
-    <div style={{ padding: '18px 20px 0' }}>
+    <div className="app-container" style={{ paddingTop: 18, paddingBottom: 24 }}>
       {/* Toast */}
       {toast && (
         <motion.div
@@ -378,25 +475,25 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* B. Streak & Quick Stats — always (placeholders until you have a plan) */}
+      {/* B. Streak & Quick Stats */}
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: cardDelays[1] }}
-        className="glass"
-        style={{ padding: 18, marginBottom: 14, display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}
+        className="card-grid"
+        style={{ marginBottom: 14 }}
       >
-        <div style={{ borderTop: '2px solid #F97316', paddingTop: 8, borderRadius: 4 }}>
+        <div className="glass" style={{ padding: 18, borderTop: '3px solid #F97316' }}>
           <div style={{ fontSize: 10, color: '#2D5B3F', fontWeight: 600 }}>🔥 STREAK</div>
           <div style={{ fontSize: 20, fontWeight: 800, color: '#fff' }}>Day 1</div>
           {!hasWorkoutPlan && <div style={{ fontSize: 9, color: '#4A6B58', marginTop: 2 }}>default</div>}
         </div>
-        <div style={{ borderTop: '2px solid #6EE7B7', paddingTop: 8, borderRadius: 4 }}>
+        <div className="glass" style={{ padding: 18, borderTop: '3px solid #6EE7B7' }}>
           <div style={{ fontSize: 10, color: '#2D5B3F', fontWeight: 600 }}>⚡ THIS WEEK</div>
           <div style={{ fontSize: 20, fontWeight: 800, color: '#fff' }}>0/4</div>
           {!hasWorkoutPlan && <div style={{ fontSize: 9, color: '#4A6B58', marginTop: 2 }}>placeholder</div>}
         </div>
-        <div style={{ borderTop: '2px solid #93C5FD', paddingTop: 8, borderRadius: 4 }}>
+        <div className="glass" style={{ padding: 18, borderTop: '3px solid #93C5FD' }}>
           <div style={{ fontSize: 10, color: '#2D5B3F', fontWeight: 600 }}>📊 PROGRESS</div>
           <div style={{
             fontSize: 18,
@@ -452,9 +549,10 @@ export default function Dashboard() {
             Log Weight
           </button>
         </div>
-        <ProgressChart data={weightLogs} targetWeight={profile.target_weight} height={160} />
+        <ProgressChart data={weightLogs} targetWeight={profile.target_weight} height={chartHeight} />
       </motion.div>
 
+      <div className="dashboard-desktop-2col">
       {/* E. Today's Focus */}
       <motion.div
         initial={{ opacity: 0, y: 20 }}
@@ -564,7 +662,7 @@ export default function Dashboard() {
         )}
       </motion.div>
 
-      {/* F. Nutrition - always visible (meal logging without plan) */}
+      {/* F. Nutrition */}
       {(() => {
         const parseTarget = (v) => parseInt(String(v || '').replace(/[^\d]/g, ''), 10) || 0
         const targetCal = mealContent ? parseTarget(mealContent.dailyCalories) : 2000
@@ -671,6 +769,7 @@ export default function Dashboard() {
           </motion.div>
         )
       })()}
+      </div>
 
       {/* G. Meal Plan Meals (only when plan exists) */}
       {mealContent && mealContent.meals?.length > 0 && (

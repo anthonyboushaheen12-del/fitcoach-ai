@@ -174,7 +174,8 @@ export default function OnboardingPage() {
   if (!user) return null
 
   return (
-    <div style={{ minHeight: '100vh', padding: '40px 24px 40px' }}>
+    <div className="app-container" style={{ minHeight: '100vh', padding: '40px 0' }}>
+      <div style={{ maxWidth: 500, margin: '0 auto', width: '100%' }}>
       <div style={{ textAlign: 'center', marginBottom: 40 }}>
         <h1 style={{ fontSize: 32, fontWeight: 800, letterSpacing: -1 }}>
           <span style={{ color: '#6EE7B7' }}>Fit</span>
@@ -362,6 +363,7 @@ export default function OnboardingPage() {
         >
           {loading ? 'Setting up...' : step === steps.length - 1 ? "Let's Go →" : 'Continue →'}
         </motion.button>
+      </div>
       </div>
     </div>
   )

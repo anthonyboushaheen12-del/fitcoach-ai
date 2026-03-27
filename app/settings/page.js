@@ -136,7 +136,8 @@ export default function Settings() {
   }
 
   return (
-    <div style={{ padding: '18px 20px 24px' }}>
+    <div className="app-container" style={{ padding: '18px 0 24px' }}>
+      <div style={{ maxWidth: 600, margin: '0 auto' }}>
       <div style={{ marginBottom: 24 }}>
         <h1 style={{ fontSize: 26, fontWeight: 800, letterSpacing: -0.8 }}>
           <span style={{ color: '#6EE7B7' }}>Fit</span>
@@ -147,7 +148,7 @@ export default function Settings() {
       </div>
 
       {/* Profile Section */}
-      <div className="glass" style={{ padding: 20, marginBottom: 14 }}>
+      <div className="glass" style={{ padding: 20, marginBottom: 14, maxWidth: 400, marginLeft: 'auto', marginRight: 'auto' }}>
         <div style={{ fontSize: 16, fontWeight: 700, color: '#fff', marginBottom: 16 }}>Profile</div>
         <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 20 }}>
           <div style={{
@@ -200,7 +201,7 @@ export default function Settings() {
       </div>
 
       {/* Body Stats Section */}
-      <div className="glass" style={{ padding: 20, marginBottom: 14 }}>
+      <div className="glass" style={{ padding: 20, marginBottom: 14, maxWidth: 400, marginLeft: 'auto', marginRight: 'auto' }}>
         <div style={{ fontSize: 16, fontWeight: 700, color: '#fff', marginBottom: 16 }}>Body Stats</div>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
           <div>
@@ -234,7 +235,7 @@ export default function Settings() {
       </div>
 
       {/* Preferences Section */}
-      <div className="glass" style={{ padding: 20, marginBottom: 14 }}>
+      <div className="glass" style={{ padding: 20, marginBottom: 14, maxWidth: 400, marginLeft: 'auto', marginRight: 'auto' }}>
         <div style={{ fontSize: 16, fontWeight: 700, color: '#fff', marginBottom: 16 }}>Preferences</div>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
           <div>
@@ -277,7 +278,7 @@ export default function Settings() {
       </div>
 
       {/* Data Section */}
-      <div className="glass" style={{ padding: 20, marginBottom: 14 }}>
+      <div className="glass" style={{ padding: 20, marginBottom: 14, maxWidth: 400, marginLeft: 'auto', marginRight: 'auto' }}>
         <div style={{ fontSize: 16, fontWeight: 700, color: '#fff', marginBottom: 16 }}>Data</div>
         <button style={{
           width: '100%', padding: 14, borderRadius: 12, marginBottom: 10,
@@ -324,6 +325,8 @@ export default function Settings() {
       <div style={{ textAlign: 'center', padding: '24px 0', color: '#1F4030', fontSize: 12 }}>
         <div style={{ fontWeight: 600 }}>FitCoach AI v1.0</div>
         <div style={{ marginTop: 4 }}>Powered by Claude</div>
+      </div>
+
       </div>
 
       <WeightModal open={weightModalOpen} onClose={() => setWeightModalOpen(false)} profile={profile} onSave={handleLogWeight} />

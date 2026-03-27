@@ -173,7 +173,8 @@ function ChatContent() {
   if (!profile) return null
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 70px)' }}>
+    <div className="chat-page-root">
+      <div className="chat-page-inner">
       {/* Chat Header */}
       <div style={{ padding: '18px 20px 12px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -364,6 +365,7 @@ function ChatContent() {
             }}
           >↑</button>
         </div>
+      </div>
       </div>
     </div>
   )

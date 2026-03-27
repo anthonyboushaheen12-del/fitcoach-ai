@@ -47,17 +47,38 @@ export function AuthProvider({ children }) {
       return
     }
 
+    const AUTH_INIT_MS = 5000
     let cancelled = false
     const timeout = setTimeout(() => {
-      if (!cancelled) { setLoading(false); setProfileLoading(false) }
-    }, 3500)
+      if (!cancelled) {
+        setLoading(false)
+        setProfileLoading(false)
+      }
+    }, AUTH_INIT_MS)
     const fallbackTimeout = setTimeout(() => {
       if (!cancelled) setShowFallback(true)
-    }, 2500)
+    }, 2800)
 
     const initAuth = async () => {
       try {
-        const { data: { user: u } } = await supabase.auth.getUser()
+        let u = null
+        try {
+          const { data } = await Promise.race([
+            supabase.auth.getUser(),
+            new Promise((_, reject) =>
+              setTimeout(() => reject(new Error('getUser timeout')), AUTH_INIT_MS)
+            ),
+          ])
+          u = data?.user ?? null
+        } catch (e) {
+          console.warn('Auth getUser slow or failed, trying getSession:', e?.message)
+          try {
+            const { data: sess } = await supabase.auth.getSession()
+            u = sess?.session?.user ?? null
+          } catch {
+            u = null
+          }
+        }
         if (cancelled) return
         setUser(u || null)
         if (u) {
@@ -125,6 +146,7 @@ export function AuthProvider({ children }) {
         localStorage.removeItem('onboardingContext')
         localStorage.removeItem('aspirationGoal')
       }
+      setLoading(false)
     })
 
     return () => {
@@ -182,9 +204,11 @@ export function AuthProvider({ children }) {
         <div style={{
           minHeight: '100vh',
           display: 'flex',
+          flexDirection: 'column',
           alignItems: 'center',
           justifyContent: 'center',
           background: '#070B07',
+          gap: 16,
         }}>
           <div style={{ textAlign: 'center' }}>
             <div style={{ fontSize: 32, fontWeight: 800, color: '#6EE7B7' }}>
@@ -197,7 +221,17 @@ export function AuthProvider({ children }) {
                 WebkitTextFillColor: 'transparent',
               }}>AI</span>
             </div>
-            <div style={{ color: '#2D5B3F', fontSize: 13, marginTop: 8 }}>Loading...</div>
+            <div style={{
+              width: 120,
+              height: 3,
+              borderRadius: 100,
+              background: 'rgba(110,231,183,0.12)',
+              overflow: 'hidden',
+              margin: '16px auto 0',
+            }}>
+              <div className="auth-loading-bar-inner" />
+            </div>
+            <div style={{ color: '#2D5B3F', fontSize: 13, marginTop: 12 }}>Loading...</div>
             {showFallback && (
               <div style={{ marginTop: 24, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
                 <div style={{ color: '#6B7280', fontSize: 13 }}>Taking longer than expected?</div>

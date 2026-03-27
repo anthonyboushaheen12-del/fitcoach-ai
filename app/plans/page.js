@@ -505,7 +505,8 @@ export default function Plans() {
     const picked = getTrainer(selectedTrainerId)
     const others = trainersList.filter((t) => t.id !== selectedTrainerId)
     return (
-      <div style={{ padding: '18px 20px 24px' }}>
+      <div className="app-container" style={{ padding: '18px 0 24px' }}>
+        <div className="plans-quiz-inner">
         <button
           type="button"
           onClick={() => {
@@ -574,6 +575,7 @@ export default function Plans() {
             </p>
           )}
         </div>
+        </div>
       </div>
     )
   }
@@ -606,7 +608,8 @@ export default function Plans() {
     }
 
     return (
-      <div style={{ padding: '18px 20px 0' }}>
+      <div className="app-container" style={{ padding: '18px 0 0' }}>
+        <div className="plans-quiz-inner">
         <div style={{ marginBottom: 20 }}>
           <button
             type="button"
@@ -814,6 +817,7 @@ export default function Plans() {
             Continue →
           </button>
         )}
+        </div>
       </div>
     )
   }
@@ -842,7 +846,8 @@ export default function Plans() {
     }
 
     return (
-      <div style={{ padding: '18px 20px 0' }}>
+      <div className="app-container" style={{ padding: '18px 0 0' }}>
+        <div className="plans-quiz-inner">
         <div style={{ marginBottom: 20 }}>
           <button
             onClick={() => isFirst ? setView('overview') : setMealQuizStep(mealQuizStep - 1)}
@@ -957,12 +962,13 @@ export default function Plans() {
             Continue →
           </button>
         )}
+        </div>
       </div>
     )
   }
 
   return (
-    <div style={{ padding: '18px 20px 0' }}>
+    <div className="app-container" style={{ padding: '18px 0 0' }}>
       <div style={{ marginBottom: 20 }}>
         <h1 style={{ fontSize: 26, fontWeight: 800, letterSpacing: -0.8 }}>
           <span style={{ color: '#6EE7B7' }}>Fit</span>
@@ -1028,7 +1034,7 @@ export default function Plans() {
                   ))}
                 </>
               ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div className="card-grid plans-workout-days" style={{ gap: 8 }}>
                   {workoutDays.map((day, dayIdx) => {
                     const isExpanded = expandedDay === dayIdx
                     const exs = day.exercises || []
