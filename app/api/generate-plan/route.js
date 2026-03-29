@@ -27,6 +27,7 @@ export async function POST(request) {
       type = 'both',
       workoutPreferences = {},
       mealPreferences = {},
+      bodyAnalysis = null,
     } = body
 
     if (!profileId) {
@@ -121,6 +122,33 @@ Generate a complete workout plan for me based on my profile AND these specific p
 
 Use their CURRENT training and physique to avoid redundant work, respect what already works, and progress sensibly from where they are now.
 `
+      let bodyAnalysisBlock = ''
+      if (bodyAnalysis && typeof bodyAnalysis === 'object') {
+        const ba = bodyAnalysis
+        const strengths = Array.isArray(ba.strengths) ? ba.strengths.join('; ') : ''
+        const areas = Array.isArray(ba.areasToImprove) ? ba.areasToImprove.join('; ') : ''
+        const muscle =
+          ba.muscleAssessment && typeof ba.muscleAssessment === 'object'
+            ? JSON.stringify(ba.muscleAssessment)
+            : ''
+        bodyAnalysisBlock = `
+
+BODY ANALYSIS FROM PROGRESS PHOTO:
+- Estimated Body Fat (approximate range): ${ba.bodyFatEstimate || 'not specified'}
+- Build Type: ${ba.buildType || 'not specified'}
+- Overall: ${ba.overallRating || '—'}
+- Strengths: ${strengths || '—'}
+- Areas to Improve: ${areas || '—'}
+- Muscle Assessment (visible areas): ${muscle || '—'}
+- Recommended Focus (from vision): ${ba.recommendedFocus || '—'}
+- Estimated Training Age (visual): ${ba.estimatedTrainingAge || '—'}
+- Posture Notes: ${ba.postureNotes || '—'}
+
+Use this analysis to prioritize exercises for weaker or lagging areas. If a muscle group is "underdeveloped", add volume or priority for that region. If chest is underdeveloped, prioritize chest-focused movements. If posture issues are noted, include appropriate corrective or prehab work. Do not contradict safe training; when the photo did not show a body part, rely on the user's quiz answers.
+`
+      }
+
+      const workoutPromptFull = prefText + bodyAnalysisBlock
 
       const workoutResponse = await anthropic.messages.create({
         model: 'claude-sonnet-4-20250514',
@@ -128,7 +156,7 @@ Use their CURRENT training and physique to avoid redundant work, respect what al
         system: systemPrompt + '\n\nIMPORTANT: You must respond ONLY with valid JSON. No text before or after. No markdown code fences.',
         messages: [{
           role: 'user',
-          content: prefText + `
+          content: workoutPromptFull + `
 Return ONLY a JSON object in this exact format:
 {
   "name": "Plan name (e.g. Upper/Lower Split)",

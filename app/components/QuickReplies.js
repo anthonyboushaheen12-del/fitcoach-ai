@@ -3,8 +3,8 @@
 import { motion } from 'framer-motion'
 
 const SUGGESTIONS = [
+  '📷 Analyze my body from a photo',
   'What should I focus on today?',
-  'Can you assess my physique from this photo?',
   "How's my progress?",
   'Change my plan',
   'Explain my macros',

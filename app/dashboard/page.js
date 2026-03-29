@@ -16,6 +16,19 @@ import WorkoutMuscleMap from '../components/WorkoutMuscleMap'
 import FoodLogModal from '../components/FoodLogModal'
 import LogWorkoutModal from '../components/LogWorkoutModal'
 import BodyImageSlot from '../components/BodyImageSlot'
+import ProgressTimeline from '../components/ProgressTimeline'
+import PhotoUploadModal from '../components/PhotoUploadModal'
+import CompareModal from '../components/CompareModal'
+import { BodyFatLineChart } from '../components/ProgressCharts'
+
+async function jsonHeadersWithAuth() {
+  const headers = {}
+  if (supabase) {
+    const { data: { session } } = await supabase.auth.getSession()
+    if (session?.access_token) headers.Authorization = `Bearer ${session.access_token}`
+  }
+  return headers
+}
 
 function getGreeting(name) {
   const h = new Date().getHours()
@@ -52,6 +65,9 @@ export default function Dashboard() {
   const [analysisLoading, setAnalysisLoading] = useState(false)
   const [analysisResult, setAnalysisResult] = useState(null)
   const [chartHeight, setChartHeight] = useState(160)
+  const [progressPhotos, setProgressPhotos] = useState([])
+  const [photoModalOpen, setPhotoModalOpen] = useState(false)
+  const [compareOpen, setCompareOpen] = useState(false)
 
   const profile = authProfile
   const trainer = profile ? getTrainer(profile.trainer) : getTrainer('bro')
@@ -93,6 +109,23 @@ export default function Dashboard() {
       .then((r) => r.json())
       .then((data) => setRecentWorkouts(data.workouts || []))
       .catch(() => setRecentWorkouts([]))
+  }, [profile?.id])
+
+  async function loadProgressPhotos() {
+    if (!profile?.id) return
+    try {
+      const r = await fetch(`/api/progress-photo?profileId=${profile.id}`, {
+        headers: await jsonHeadersWithAuth(),
+      })
+      const d = await r.json().catch(() => ({}))
+      setProgressPhotos(d.photos || [])
+    } catch {
+      setProgressPhotos([])
+    }
+  }
+
+  useEffect(() => {
+    loadProgressPhotos()
   }, [profile?.id])
 
   useEffect(() => {
@@ -374,6 +407,63 @@ export default function Dashboard() {
           </div>
         </div>
 
+        <div
+          className="glass"
+          style={{ padding: 0, marginBottom: 24, overflow: 'hidden', border: '1px solid rgba(110,231,183,0.12)' }}
+        >
+          <div
+            style={{
+              padding: '14px 18px',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              borderBottom: '1px solid rgba(110,231,183,0.05)',
+            }}
+          >
+            <div style={{ fontSize: 15, fontWeight: 700, color: '#fff' }}>Progress photos</div>
+            <button
+              type="button"
+              onClick={() => setPhotoModalOpen(true)}
+              style={{
+                padding: '6px 14px',
+                borderRadius: 100,
+                background: 'rgba(110,231,183,0.1)',
+                border: '1px solid rgba(110,231,183,0.15)',
+                color: '#6EE7B7',
+                fontSize: 11,
+                fontWeight: 700,
+              }}
+            >
+              + Add photo
+            </button>
+          </div>
+          <ProgressTimeline
+            photos={progressPhotos}
+            onAdd={() => setPhotoModalOpen(true)}
+            onSelectPhoto={() => {
+              if (progressPhotos.length >= 2) setCompareOpen(true)
+            }}
+          />
+          {progressPhotos.length >= 2 && (
+            <div style={{ padding: '0 18px 16px' }}>
+              <div style={{ fontSize: 12, color: '#2D5B3F', fontWeight: 600, marginBottom: 8 }}>Body fat trend (estimated)</div>
+              <BodyFatLineChart photos={progressPhotos} height={140} />
+            </div>
+          )}
+        </div>
+        <PhotoUploadModal
+          isOpen={photoModalOpen}
+          onClose={() => setPhotoModalOpen(false)}
+          profile={profile}
+          onSaved={loadProgressPhotos}
+        />
+        <CompareModal
+          isOpen={compareOpen}
+          onClose={() => setCompareOpen(false)}
+          photos={progressPhotos}
+          profile={profile}
+        />
+
         <div className="card-grid">
           {[
             { emoji: '🏋️', title: 'Personalized Workouts', desc: 'Tailored to your goals, experience, and equipment' },
@@ -599,6 +689,67 @@ export default function Dashboard() {
         </div>
         <ProgressChart data={weightLogs} targetWeight={profile.target_weight} height={chartHeight} />
       </motion.div>
+
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: cardDelays[2] }}
+        className="glass"
+        style={{ padding: 0, marginBottom: 14, overflow: 'hidden' }}
+      >
+        <div
+          style={{
+            padding: '16px 18px',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            borderBottom: '1px solid rgba(110,231,183,0.05)',
+          }}
+        >
+          <div style={{ fontSize: 16, fontWeight: 700, color: '#fff' }}>Progress photos</div>
+          <button
+            type="button"
+            onClick={() => setPhotoModalOpen(true)}
+            style={{
+              padding: '6px 14px',
+              borderRadius: 100,
+              background: 'rgba(110,231,183,0.1)',
+              border: '1px solid rgba(110,231,183,0.15)',
+              color: '#6EE7B7',
+              fontSize: 11,
+              fontWeight: 700,
+            }}
+          >
+            + Add photo
+          </button>
+        </div>
+        <ProgressTimeline
+          photos={progressPhotos}
+          onAdd={() => setPhotoModalOpen(true)}
+          onSelectPhoto={() => {
+            if (progressPhotos.length >= 2) setCompareOpen(true)
+          }}
+        />
+        {progressPhotos.length >= 2 && (
+          <div style={{ padding: '0 18px 16px' }}>
+            <div style={{ fontSize: 12, color: '#2D5B3F', fontWeight: 600, marginBottom: 8 }}>Body fat trend (estimated)</div>
+            <BodyFatLineChart photos={progressPhotos} height={140} />
+          </div>
+        )}
+      </motion.div>
+
+      <PhotoUploadModal
+        isOpen={photoModalOpen}
+        onClose={() => setPhotoModalOpen(false)}
+        profile={profile}
+        onSaved={loadProgressPhotos}
+      />
+      <CompareModal
+        isOpen={compareOpen}
+        onClose={() => setCompareOpen(false)}
+        photos={progressPhotos}
+        profile={profile}
+      />
 
       <div className="dashboard-desktop-2col">
       {/* E. Today's Focus */}

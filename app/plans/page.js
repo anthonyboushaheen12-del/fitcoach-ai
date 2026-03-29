@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { motion, AnimatePresence } from 'framer-motion'
 import { supabase } from '../../lib/supabase'
@@ -10,6 +10,7 @@ import BrandedAuthLoading from '../components/BrandedAuthLoading'
 import { useProfileResolutionTimeout } from '../hooks/useProfileResolutionTimeout'
 import ExerciseRow from '../components/ExerciseRow'
 import WorkoutMuscleMap from '../components/WorkoutMuscleMap'
+import { compressImageForUpload } from '../../lib/image-compress'
 
 async function jsonHeadersWithAuth() {
   const headers = { 'Content-Type': 'application/json' }
@@ -24,6 +25,8 @@ const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const MEAL_EMOJIS = ['🍳', '🥗', '🍌', '🥩']
 
 const WORKOUT_QUIZ_BODY_STEP = 0
+/** Current physique photo + AI analysis (before text/workout questions). */
+const WORKOUT_QUIZ_CURRENT_PHYSIQUE_STEP = 1
 
 const LABEL_MAP = {
   beginner: '🟢 Beginner',
@@ -143,7 +146,8 @@ const WORKOUT_STEPS = [
   },
 ]
 
-const WORKOUT_QUIZ_STEP_COUNT = 1 + WORKOUT_STEPS.length
+/** Goal inspiration + current physique + WORKOUT_STEPS */
+const WORKOUT_QUIZ_STEP_COUNT = 2 + WORKOUT_STEPS.length
 
 const MEAL_STEPS = [
   {
@@ -238,6 +242,11 @@ export default function Plans() {
   const [trainerRecommendation, setTrainerRecommendation] = useState(null)
   const [selectedTrainerId, setSelectedTrainerId] = useState('bro')
   const [pendingGenerateType, setPendingGenerateType] = useState(null)
+  const [currentPhysiquePreviewUrl, setCurrentPhysiquePreviewUrl] = useState(null)
+  const [currentPhysiqueBase64, setCurrentPhysiqueBase64] = useState(null)
+  const [bodyAnalysis, setBodyAnalysis] = useState(null)
+  const [bodyAnalysisStatus, setBodyAnalysisStatus] = useState('idle')
+  const initialProgressPhotoSavedRef = useRef(false)
 
   useEffect(() => {
     if (!user) { router.push('/'); return }
@@ -314,6 +323,66 @@ export default function Plans() {
     setBodyGoalImageMediaType('image/jpeg')
   }
 
+  function clearCurrentPhysiqueQuiz() {
+    setCurrentPhysiquePreviewUrl(null)
+    setCurrentPhysiqueBase64(null)
+    setBodyAnalysis(null)
+    setBodyAnalysisStatus('idle')
+    initialProgressPhotoSavedRef.current = false
+  }
+
+  async function handleCurrentPhysiqueFile(e) {
+    const file = e.target.files?.[0]
+    if (!file || !profile) return
+    if (!file.type.startsWith('image/')) {
+      setGenError('Please select an image file')
+      return
+    }
+    e.target.value = ''
+    initialProgressPhotoSavedRef.current = false
+    setGenError(null)
+    try {
+      const { base64, mediaType } = await compressImageForUpload(file)
+      const dataUrl = `data:${mediaType};base64,${base64}`
+      setCurrentPhysiquePreviewUrl(dataUrl)
+      setCurrentPhysiqueBase64(base64)
+      setBodyAnalysis(null)
+      setBodyAnalysisStatus('loading')
+      const res = await fetch('/api/analyze-body', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          image: base64,
+          mediaType,
+          profile,
+        }),
+      })
+      const data = await res.json().catch(() => ({}))
+      const analysis = data.analysis || data
+      setBodyAnalysis(analysis)
+      setBodyAnalysisStatus('done')
+      if (profile?.id && analysis && !initialProgressPhotoSavedRef.current) {
+        const pr = await fetch('/api/progress-photo', {
+          method: 'POST',
+          headers: await jsonHeadersWithAuth(),
+          body: JSON.stringify({
+            profileId: profile.id,
+            imageBase64: base64,
+            analysis,
+            weightAtTime: profile.weight_kg,
+            notes: 'Initial body assessment',
+            photoType: 'front',
+          }),
+        })
+        if (pr.ok) initialProgressPhotoSavedRef.current = true
+      }
+    } catch (err) {
+      console.error(err)
+      setBodyAnalysisStatus('error')
+      setGenError(err?.message || 'Could not process photo')
+    }
+  }
+
   function handleBodyGoalFile(e) {
     const file = e.target.files?.[0]
     if (!file) return
@@ -350,6 +419,7 @@ export default function Plans() {
           bodyGoalImageMediaType: bodyGoalImageBase64 ? bodyGoalImageMediaType : undefined,
           bodyGoalDescription: bodyGoalDescription?.trim() || undefined,
           mealOnlyContext: !!mealOnly,
+          bodyAnalysis: !mealOnly && bodyAnalysis ? bodyAnalysis : undefined,
         }),
       })
       const data = await res.json().catch(() => ({}))
@@ -402,6 +472,7 @@ export default function Plans() {
         onboardingContext: profile?.onboarding_context,
         type: 'workout',
         workoutPreferences,
+        bodyAnalysis: bodyAnalysis || null,
       }),
     })
     const data = await res.json().catch(() => ({}))
@@ -414,6 +485,7 @@ export default function Plans() {
     setView('overview')
     setWorkoutQuizStep(WORKOUT_QUIZ_BODY_STEP)
     clearBodyGoalUpload()
+    clearCurrentPhysiqueQuiz()
     setTrainerRecommendation(null)
     setPendingGenerateType(null)
     router.push('/dashboard')
@@ -678,17 +750,20 @@ export default function Plans() {
   if (view === 'workout-quiz') {
     const steps = WORKOUT_STEPS
     const onBodyStep = workoutQuizStep === WORKOUT_QUIZ_BODY_STEP
-    const stepIdx = workoutQuizStep - 1
-    const step = !onBodyStep ? steps[stepIdx] : null
+    const onCurrentPhysiqueStep = workoutQuizStep === WORKOUT_QUIZ_CURRENT_PHYSIQUE_STEP
+    const stepIdx = workoutQuizStep - 2
+    const step = !onBodyStep && !onCurrentPhysiqueStep && stepIdx >= 0 ? steps[stepIdx] : null
     const isLast = workoutQuizStep === WORKOUT_QUIZ_STEP_COUNT - 1
     const isFirst = workoutQuizStep === WORKOUT_QUIZ_BODY_STEP
     const canNext = onBodyStep
       ? true
-      : step.textarea
-        ? true
-        : step.multi
-          ? (workoutPrefs[step.id]?.length || 0) > 0
-          : workoutPrefs[step.id] != null && workoutPrefs[step.id] !== ''
+      : onCurrentPhysiqueStep
+        ? bodyAnalysisStatus !== 'loading'
+        : step.textarea
+          ? true
+          : step.multi
+            ? (workoutPrefs[step.id]?.length || 0) > 0
+            : workoutPrefs[step.id] != null && workoutPrefs[step.id] !== ''
 
     if (recommendLoading) {
       return (
@@ -812,7 +887,133 @@ export default function Plans() {
                 Skip this step
               </button>
             </motion.div>
-          ) : step.textarea ? (
+          ) : onCurrentPhysiqueStep ? (
+            <motion.div key="current-physique" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
+              <h2 style={{ fontSize: 18, fontWeight: 700, color: '#fff', marginBottom: 6 }}>
+                Show us where you&apos;re starting from
+              </h2>
+              <p style={{ fontSize: 13, color: '#2D5B3F', marginBottom: 16, lineHeight: 1.5 }}>
+                Upload a photo and our AI will analyze your physique to personalize your program.
+              </p>
+              <label
+                style={{
+                  display: 'block',
+                  minHeight: 250,
+                  borderRadius: 16,
+                  border: '2px dashed rgba(110,231,183,0.25)',
+                  background: 'rgba(14,20,14,0.45)',
+                  cursor: bodyAnalysisStatus === 'loading' ? 'wait' : 'pointer',
+                  overflow: 'hidden',
+                  position: 'relative',
+                }}
+              >
+                <input
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  style={{ display: 'none' }}
+                  disabled={bodyAnalysisStatus === 'loading'}
+                  onChange={handleCurrentPhysiqueFile}
+                />
+                {currentPhysiquePreviewUrl ? (
+                  <>
+                    <img src={currentPhysiquePreviewUrl} alt="" style={{ width: '100%', height: 250, objectFit: 'cover' }} />
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.preventDefault()
+                        e.stopPropagation()
+                        clearCurrentPhysiqueQuiz()
+                      }}
+                      style={{
+                        position: 'absolute',
+                        top: 8,
+                        right: 8,
+                        padding: '6px 10px',
+                        borderRadius: 10,
+                        border: 'none',
+                        background: 'rgba(0,0,0,0.65)',
+                        color: '#fff',
+                        fontSize: 12,
+                        fontWeight: 600,
+                        zIndex: 3,
+                      }}
+                    >
+                      ✕ Remove
+                    </button>
+                  </>
+                ) : (
+                  <div style={{ height: 250, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, padding: 16 }}>
+                    <span style={{ fontSize: 40 }}>📷</span>
+                    <span style={{ fontSize: 14, color: '#6EE7B7', fontWeight: 600, textAlign: 'center' }}>Tap to upload a body photo</span>
+                    <span style={{ fontSize: 12, color: '#2D5B3F', textAlign: 'center' }}>
+                      Front-facing, good lighting · Shirtless or fitted clothing
+                    </span>
+                  </div>
+                )}
+              </label>
+              {bodyAnalysisStatus === 'loading' && (
+                <div style={{ marginTop: 16, textAlign: 'center' }}>
+                  <motion.div
+                    animate={{ opacity: [0.5, 1, 0.5] }}
+                    transition={{ duration: 1.2, repeat: Infinity }}
+                    style={{ fontSize: 15, fontWeight: 600, color: '#6EE7B7' }}
+                  >
+                    Analyzing your physique…
+                  </motion.div>
+                </div>
+              )}
+              {bodyAnalysis && bodyAnalysisStatus === 'done' && (
+                <div className="glass" style={{ marginTop: 16, padding: 16, border: '1px solid rgba(110,231,183,0.12)' }}>
+                  <div style={{ fontSize: 15, fontWeight: 700, color: '#6EE7B7', marginBottom: 12 }}>Body analysis</div>
+                  <div style={{ fontSize: 13, color: '#E2FBE8', marginBottom: 8 }}>
+                    <strong>Estimated body fat:</strong> ~{bodyAnalysis.bodyFatEstimate || '—'}
+                  </div>
+                  <div style={{ fontSize: 13, color: '#E2FBE8', marginBottom: 8 }}>
+                    <strong>Build:</strong> {bodyAnalysis.buildType || '—'}
+                    {bodyAnalysis.overallRating ? ` · ${bodyAnalysis.overallRating}` : ''}
+                  </div>
+                  <div style={{ height: 1, background: 'rgba(110,231,183,0.15)', margin: '12px 0' }} />
+                  <div style={{ fontSize: 12, color: '#2D5B3F', fontWeight: 600, marginBottom: 6 }}>Strengths</div>
+                  <ul style={{ margin: '0 0 12px 18px', padding: 0, color: '#D1FAE5', fontSize: 13, lineHeight: 1.5 }}>
+                    {(bodyAnalysis.strengths || []).slice(0, 5).map((s, i) => (
+                      <li key={i}>{s}</li>
+                    ))}
+                  </ul>
+                  <div style={{ fontSize: 12, color: '#2D5B3F', fontWeight: 600, marginBottom: 6 }}>Areas to focus</div>
+                  <ul style={{ margin: '0 0 12px 18px', padding: 0, color: '#D1FAE5', fontSize: 13, lineHeight: 1.5 }}>
+                    {(bodyAnalysis.areasToImprove || []).slice(0, 5).map((s, i) => (
+                      <li key={i}>{s}</li>
+                    ))}
+                  </ul>
+                  {bodyAnalysis.recommendedFocus && (
+                    <>
+                      <div style={{ fontSize: 12, color: '#2D5B3F', fontWeight: 600, marginBottom: 6 }}>Recommendation</div>
+                      <p style={{ fontSize: 13, color: '#E2FBE8', lineHeight: 1.55, margin: 0 }}>{bodyAnalysis.recommendedFocus}</p>
+                    </>
+                  )}
+                </div>
+              )}
+              <button
+                type="button"
+                onClick={() => {
+                  clearCurrentPhysiqueQuiz()
+                  setWorkoutQuizStep(2)
+                }}
+                style={{
+                  marginTop: 16,
+                  background: 'none',
+                  border: 'none',
+                  color: '#2D5B3F',
+                  fontSize: 13,
+                  fontWeight: 600,
+                  width: '100%',
+                  textAlign: 'center',
+                }}
+              >
+                Skip this step
+              </button>
+            </motion.div>
+          ) : step?.textarea ? (
             <motion.div key={step.id} initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
               <h2 style={{ fontSize: 18, fontWeight: 700, color: '#fff', marginBottom: 8 }}>{step.q}</h2>
               <textarea
@@ -836,7 +1037,7 @@ export default function Plans() {
                 <p style={{ fontSize: 12, color: '#2D5B3F', margin: 0 }}>Optional — leave blank if you prefer.</p>
               )}
             </motion.div>
-          ) : (
+          ) : step ? (
             <motion.div key={step.id} initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
               <h2 style={{ fontSize: 18, fontWeight: 700, color: '#fff', marginBottom: 16 }}>{step.q}</h2>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -855,7 +1056,7 @@ export default function Plans() {
                 ))}
               </div>
             </motion.div>
-          )}
+          ) : null}
         </AnimatePresence>
         {isLast ? (
           <div style={{ marginTop: 24 }}>
@@ -872,6 +1073,11 @@ export default function Plans() {
                 {bodyGoalDescription?.trim() && (
                   <span style={{ padding: '6px 12px', borderRadius: 20, background: 'rgba(110,231,183,0.15)', fontSize: 12, color: '#6EE7B7' }}>
                     Goal image note
+                  </span>
+                )}
+                {bodyAnalysis && (
+                  <span style={{ padding: '6px 12px', borderRadius: 20, background: 'rgba(110,231,183,0.15)', fontSize: 12, color: '#6EE7B7' }}>
+                    Body photo analyzed
                   </span>
                 )}
               </div>

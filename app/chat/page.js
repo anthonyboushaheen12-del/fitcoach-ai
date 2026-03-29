@@ -391,7 +391,16 @@ function ChatContent() {
 
       {/* Quick Replies - show when empty or after trainer response */}
       {(messages.length === 0 || (messages.length > 0 && messages[messages.length - 1].role === 'assistant' && !loading)) && (
-        <QuickReplies onSelect={(text) => sendMessage(text)} />
+        <QuickReplies
+          onSelect={(text) => {
+            if (text.includes('Analyze my body')) {
+              setInput('Please assess my physique from this photo — strengths, areas to improve, and what to prioritize.')
+              queueMicrotask(() => fileInputRef.current?.click())
+              return
+            }
+            sendMessage(text)
+          }}
+        />
       )}
 
       {/* Input Bar */}

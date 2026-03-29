@@ -33,6 +33,7 @@ export async function POST(request) {
       bodyGoalImageMediaType = 'image/jpeg',
       bodyGoalDescription,
       mealOnlyContext,
+      bodyAnalysis = null,
     } = body
 
     if (!profile || typeof profile !== 'object') {
@@ -122,6 +123,14 @@ WORKOUT PREFERENCES:
 
 ${bodyGoalDescription ? `PHYSIQUE GOAL DESCRIPTION: ${bodyGoalDescription}` : ''}
 ${bodyGoalImage ? 'A reference physique image has been provided above.' : 'No reference image provided.'}
+${bodyAnalysis && typeof bodyAnalysis === 'object' ? `
+CURRENT PHYSIQUE PHOTO ANALYSIS (AI):
+- Body fat (range): ${bodyAnalysis.bodyFatEstimate || '—'}
+- Build: ${bodyAnalysis.buildType || '—'}
+- Strengths: ${Array.isArray(bodyAnalysis.strengths) ? bodyAnalysis.strengths.join('; ') : '—'}
+- Areas to improve: ${Array.isArray(bodyAnalysis.areasToImprove) ? bodyAnalysis.areasToImprove.join('; ') : '—'}
+- Focus: ${bodyAnalysis.recommendedFocus || '—'}
+` : ''}
 
 THE 5 AVAILABLE TRAINER PERSONAS:
 
