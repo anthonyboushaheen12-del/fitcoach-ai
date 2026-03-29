@@ -6,6 +6,14 @@ const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY || '',
 })
 
+const PROGRAM_ADJUSTMENTS_MAX = 2000
+
+/** Free-form user instructions to change the program; empty if absent or invalid. */
+function normalizeProgramAdjustments(raw) {
+  if (typeof raw !== 'string') return ''
+  return raw.trim().slice(0, PROGRAM_ADJUSTMENTS_MAX)
+}
+
 export async function POST(request) {
   let supabase
   try {
@@ -28,6 +36,7 @@ export async function POST(request) {
       workoutPreferences = {},
       mealPreferences = {},
       bodyAnalysis = null,
+      programAdjustments = null,
     } = body
 
     if (!profileId) {
@@ -53,6 +62,17 @@ export async function POST(request) {
 
     const trainer = getTrainer(trainerId || profile?.trainer)
     const systemPrompt = buildSystemPrompt(trainer, profile) + buildOnboardingContextPrompt(onboardingContext || profile?.onboarding_context)
+
+    const adjustmentsText = normalizeProgramAdjustments(
+      programAdjustments != null ? String(programAdjustments) : ''
+    )
+    const adjustmentBlock = adjustmentsText
+      ? `
+
+USER-REQUESTED PROGRAM CHANGES (honor these closely while staying consistent with their profile, goals, and safety; do not add extreme cuts, banned substances, or unsafe advice):
+${adjustmentsText}
+`
+      : ''
 
     const doWorkout = type === 'workout' || type === 'both'
     const doMeal = type === 'meal' || type === 'both'
@@ -148,7 +168,7 @@ Use this analysis to prioritize exercises for weaker or lagging areas. If a musc
 `
       }
 
-      const workoutPromptFull = prefText + bodyAnalysisBlock
+      const workoutPromptFull = prefText + bodyAnalysisBlock + adjustmentBlock
 
       const workoutResponse = await anthropic.messages.create({
         model: 'claude-sonnet-4-20250514',
@@ -250,7 +270,7 @@ Generate a daily meal plan for me based on my profile AND these specific prefere
         system: systemPrompt + '\n\nIMPORTANT: You must respond ONLY with valid JSON. No text before or after. No markdown code fences.',
         messages: [{
           role: 'user',
-          content: prefText + `
+          content: prefText + adjustmentBlock + `
 Return ONLY a JSON object in this exact format:
 {
   "name": "Cut Meal Plan",

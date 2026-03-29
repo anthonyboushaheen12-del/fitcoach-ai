@@ -68,6 +68,10 @@ export default function Dashboard() {
   const [progressPhotos, setProgressPhotos] = useState([])
   const [photoModalOpen, setPhotoModalOpen] = useState(false)
   const [compareOpen, setCompareOpen] = useState(false)
+  const [programAdjustText, setProgramAdjustText] = useState('')
+  const [adjustScope, setAdjustScope] = useState('both')
+  const [adjustLoading, setAdjustLoading] = useState(false)
+  const [adjustError, setAdjustError] = useState(null)
 
   const profile = authProfile
   const trainer = profile ? getTrainer(profile.trainer) : getTrainer('bro')
@@ -279,6 +283,51 @@ export default function Dashboard() {
     await refreshProfile()
     setToast(`Switched to ${t.name}`)
     setTimeout(() => setToast(null), 2000)
+  }
+
+  async function handleRegenerateWithAdjustments() {
+    if (!profile?.id) return
+    const text = programAdjustText.trim()
+    if (!text) {
+      setAdjustError('Describe what you want to change first.')
+      return
+    }
+    setAdjustLoading(true)
+    setAdjustError(null)
+    try {
+      const workoutPreferences = { ...(profile.preferences?.workout || {}) }
+      const mealPreferences = { ...(profile.preferences?.meal || {}) }
+      const tid = profile.trainer || 'bro'
+      const res = await fetch('/api/generate-plan', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(await jsonHeadersWithAuth()),
+        },
+        body: JSON.stringify({
+          profileId: profile.id,
+          profile: { ...profile, trainer: tid },
+          trainerId: tid,
+          onboardingContext: profile?.onboarding_context,
+          type: adjustScope,
+          workoutPreferences,
+          mealPreferences,
+          programAdjustments: text,
+        }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || data.details || `Could not update your program (${res.status}).`)
+      }
+      await Promise.all([loadPlansAndWeightLogs(), refreshProfile()])
+      setProgramAdjustText('')
+      setToast('Program updated from your notes')
+      setTimeout(() => setToast(null), 2500)
+    } catch (err) {
+      setAdjustError(err?.message || 'Something went wrong. Try again.')
+    } finally {
+      setAdjustLoading(false)
+    }
   }
 
   const showProfileStuckError =
@@ -641,6 +690,100 @@ export default function Dashboard() {
             {(cwN == null || swN == null) ? '—' : `${weightDiff >= 0 ? '+' : ''}${weightDiff.toFixed(1)} kg`}
           </div>
         </div>
+      </motion.div>
+
+      {/* Adjust program (free-form) */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: cardDelays[1] + 50 }}
+        className="glass"
+        style={{
+          padding: 18,
+          marginBottom: 14,
+          border: '1px solid rgba(110,231,183,0.14)',
+          background: 'rgba(14, 20, 14, 0.92)',
+          WebkitBackfaceVisibility: 'visible',
+        }}
+      >
+        <div style={{ fontSize: 15, fontWeight: 800, color: '#fff', marginBottom: 6 }}>Change your program</div>
+        <p style={{ fontSize: 12, color: '#8BAFA0', lineHeight: 1.5, marginBottom: 12 }}>
+          Tell the coach anything you want different—schedule, exercises, equipment, injuries, diet tweaks, macro targets, foods to avoid, etc. We&apos;ll regenerate your active plan using your saved quiz answers plus these notes.
+        </p>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
+          {[
+            { id: 'both', label: 'Workout + meals' },
+            { id: 'workout', label: 'Workout only' },
+            { id: 'meal', label: 'Meals only' },
+          ].map(({ id, label }) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => setAdjustScope(id)}
+              style={{
+                padding: '8px 14px',
+                borderRadius: 100,
+                border: adjustScope === id ? '1px solid rgba(110,231,183,0.45)' : '1px solid rgba(110,231,183,0.12)',
+                background: adjustScope === id ? 'rgba(16,185,129,0.2)' : 'rgba(14,20,14,0.5)',
+                color: adjustScope === id ? '#6EE7B7' : '#A7C4B8',
+                fontSize: 12,
+                fontWeight: 600,
+                cursor: 'pointer',
+              }}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <textarea
+          value={programAdjustText}
+          onChange={(e) => {
+            setProgramAdjustText(e.target.value.slice(0, 2000))
+            if (adjustError) setAdjustError(null)
+          }}
+          placeholder="e.g. Swap barbell bench for dumbbells, only have 3 days/week now, no dairy, more protein at breakfast…"
+          rows={4}
+          style={{
+            width: '100%',
+            boxSizing: 'border-box',
+            padding: '12px 14px',
+            borderRadius: 12,
+            border: '1px solid rgba(110,231,183,0.15)',
+            background: 'rgba(8,12,8,0.65)',
+            color: '#E2FBE8',
+            fontSize: 14,
+            fontFamily: "'Outfit', sans-serif",
+            resize: 'vertical',
+            minHeight: 96,
+            marginBottom: 10,
+          }}
+        />
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
+          <span style={{ fontSize: 11, color: '#4A6B58' }}>{programAdjustText.length}/2000</span>
+          <button
+            type="button"
+            disabled={adjustLoading || !programAdjustText.trim()}
+            onClick={handleRegenerateWithAdjustments}
+            style={{
+              padding: '12px 20px',
+              borderRadius: 12,
+              border: 'none',
+              background:
+                adjustLoading || !programAdjustText.trim()
+                  ? 'rgba(74,107,88,0.4)'
+                  : 'linear-gradient(135deg, #10B981, #6EE7B7)',
+              color: adjustLoading || !programAdjustText.trim() ? '#6B8F7A' : '#070B07',
+              fontSize: 14,
+              fontWeight: 700,
+              cursor: adjustLoading || !programAdjustText.trim() ? 'not-allowed' : 'pointer',
+            }}
+          >
+            {adjustLoading ? 'Updating…' : 'Update program'}
+          </button>
+        </div>
+        {adjustError && (
+          <p style={{ fontSize: 12, color: '#FB7185', marginTop: 10, marginBottom: 0 }}>{adjustError}</p>
+        )}
       </motion.div>
 
       {/* C. Muscle Coverage (weekly) */}
