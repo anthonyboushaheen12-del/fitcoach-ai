@@ -6,14 +6,24 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { supabase } from '../../lib/supabase'
 import { getTrainer, trainers as trainersList } from '../../lib/trainers'
 import { useAuth } from '../components/AuthProvider'
+import BrandedAuthLoading from '../components/BrandedAuthLoading'
+import { useProfileResolutionTimeout } from '../hooks/useProfileResolutionTimeout'
 import ExerciseRow from '../components/ExerciseRow'
 import WorkoutMuscleMap from '../components/WorkoutMuscleMap'
+
+async function jsonHeadersWithAuth() {
+  const headers = { 'Content-Type': 'application/json' }
+  if (supabase) {
+    const { data: { session } } = await supabase.auth.getSession()
+    if (session?.access_token) headers.Authorization = `Bearer ${session.access_token}`
+  }
+  return headers
+}
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const MEAL_EMOJIS = ['🍳', '🥗', '🍌', '🥩']
 
 const WORKOUT_QUIZ_BODY_STEP = 0
-const WORKOUT_QUIZ_STEP_COUNT = 7
 
 const LABEL_MAP = {
   beginner: '🟢 Beginner',
@@ -51,6 +61,22 @@ function hasActiveWorkoutPlan(planRows) {
 }
 
 const WORKOUT_STEPS = [
+  {
+    id: 'currentTraining',
+    q: 'How do you currently train? What program or routine are you on (if any)?',
+    optional: true,
+    textarea: true,
+    placeholder:
+      'e.g. Upper/lower 4×/week, CrossFit 3×, mostly cardio, or “new to the gym / no set program”',
+  },
+  {
+    id: 'currentPhysique',
+    q: 'How would you describe your current physique?',
+    optional: true,
+    textarea: true,
+    placeholder:
+      'e.g. Skinny-fat, decent muscle but soft midsection, very lean but small, athletic — whatever fits you',
+  },
   {
     id: 'experience',
     q: "What's your training experience?",
@@ -113,8 +139,11 @@ const WORKOUT_STEPS = [
     q: 'Any injuries or limitations?',
     optional: true,
     textarea: true,
+    placeholder: 'e.g. Bad left shoulder, lower back issues… Leave blank if none',
   },
 ]
+
+const WORKOUT_QUIZ_STEP_COUNT = 1 + WORKOUT_STEPS.length
 
 const MEAL_STEPS = [
   {
@@ -186,7 +215,8 @@ const inputStyle = {
 export default function Plans() {
   const router = useRouter()
   const searchParams = useSearchParams()
-  const { user, profile, refreshProfile } = useAuth()
+  const { user, profile, refreshProfile, profileLoading, loading: authLoading } = useAuth()
+  const profileResolutionTimedOut = useProfileResolutionTimeout(user, profile, 3000)
   const [plans, setPlans] = useState([])
   const [loading, setLoading] = useState(true)
   const [view, setView] = useState('overview')
@@ -211,8 +241,8 @@ export default function Plans() {
 
   useEffect(() => {
     if (!user) { router.push('/'); return }
-    if (user && !profile) { router.push('/onboarding'); return }
-  }, [user, profile, router])
+    if (user && !profile && !profileLoading && !authLoading) { router.push('/onboarding'); return }
+  }, [user, profile, profileLoading, authLoading, router])
 
   useEffect(() => {
     const start = searchParams.get('start')
@@ -234,11 +264,26 @@ export default function Plans() {
   }, [profile?.preferences])
 
   async function loadPlans(profileId) {
-    const { data } = await supabase
+    if (!supabase) {
+      setPlans([])
+      setLoading(false)
+      return
+    }
+    const q = supabase
       .from('plans')
       .select('*')
       .eq('profile_id', profileId)
       .order('created_at', { ascending: false })
+    let data = null
+    try {
+      const res = await Promise.race([
+        q,
+        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 3000)),
+      ])
+      data = res?.data ?? null
+    } catch {
+      data = null
+    }
     setPlans(data || [])
     setLoading(false)
   }
@@ -349,7 +394,7 @@ export default function Plans() {
     }
     const res = await fetch('/api/generate-plan', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: await jsonHeadersWithAuth(),
       body: JSON.stringify({
         profileId: profile.id,
         profile: { ...profile, trainer: trainerId },
@@ -382,7 +427,7 @@ export default function Plans() {
     }
     const res = await fetch('/api/generate-plan', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: await jsonHeadersWithAuth(),
       body: JSON.stringify({
         profileId: profile.id,
         profile: { ...profile, trainer: trainerId },
@@ -448,8 +493,58 @@ export default function Plans() {
     await fetchTrainerRecommendation(true)
   }
 
-  if (loading || !profile) {
-    return <div style={{ padding: 40, textAlign: 'center', color: '#2D5B3F' }}>Loading plans...</div>
+  const showProfileStuckError =
+    user &&
+    !profile &&
+    profileResolutionTimedOut &&
+    (profileLoading || authLoading)
+
+  const showPlansGateLoading =
+    (loading || !profile) &&
+    !showProfileStuckError
+
+  if (showProfileStuckError) {
+    return (
+      <div className="app-container" style={{ paddingTop: 48, paddingBottom: 32, textAlign: 'center' }}>
+        <p style={{ color: '#FB7185', fontSize: 15, fontWeight: 600, marginBottom: 12 }}>Couldn&apos;t load your profile</p>
+        <p style={{ color: '#2D5B3F', fontSize: 14, maxWidth: 360, margin: '0 auto 20px', lineHeight: 1.5 }}>
+          Check your connection, then try again.
+        </p>
+        <button
+          type="button"
+          onClick={() => refreshProfile()}
+          style={{
+            padding: '12px 24px',
+            borderRadius: 12,
+            border: '1px solid rgba(110,231,183,0.35)',
+            background: 'rgba(16,185,129,0.2)',
+            color: '#6EE7B7',
+            fontWeight: 600,
+            marginRight: 12,
+          }}
+        >
+          Retry
+        </button>
+        <button
+          type="button"
+          onClick={() => router.push('/')}
+          style={{
+            padding: '12px 24px',
+            borderRadius: 12,
+            border: '1px solid rgba(110,231,183,0.15)',
+            background: 'transparent',
+            color: '#A7C4B8',
+            fontWeight: 600,
+          }}
+        >
+          Home
+        </button>
+      </div>
+    )
+  }
+
+  if (showPlansGateLoading) {
+    return <BrandedAuthLoading minHeight="70vh" />
   }
 
   const trainer = getTrainer(profile.trainer)
@@ -721,21 +816,25 @@ export default function Plans() {
             <motion.div key={step.id} initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
               <h2 style={{ fontSize: 18, fontWeight: 700, color: '#fff', marginBottom: 8 }}>{step.q}</h2>
               <textarea
-                placeholder="e.g. Bad left shoulder, lower back issues... Leave blank if none"
+                placeholder={step.placeholder || 'Share any details that help…'}
                 value={workoutPrefs[step.id] || ''}
                 onChange={(e) => updateWorkoutPref(step.id, e.target.value)}
                 rows={4}
                 style={{ ...inputStyle, resize: 'vertical', minHeight: 100, marginBottom: 12 }}
               />
-              <div style={{ display: 'flex', gap: 10 }}>
-                <button
-                  type="button"
-                  onClick={() => updateWorkoutPref(step.id, '')}
-                  style={{ padding: '10px 16px', borderRadius: 12, border: '1px solid rgba(110,231,183,0.2)', background: 'transparent', color: '#2D5B3F', fontSize: 13 }}
-                >
-                  No limitations
-                </button>
-              </div>
+              {step.id === 'injuries' ? (
+                <div style={{ display: 'flex', gap: 10 }}>
+                  <button
+                    type="button"
+                    onClick={() => updateWorkoutPref(step.id, '')}
+                    style={{ padding: '10px 16px', borderRadius: 12, border: '1px solid rgba(110,231,183,0.2)', background: 'transparent', color: '#2D5B3F', fontSize: 13 }}
+                  >
+                    No limitations
+                  </button>
+                </div>
+              ) : (
+                <p style={{ fontSize: 12, color: '#2D5B3F', margin: 0 }}>Optional — leave blank if you prefer.</p>
+              )}
             </motion.div>
           ) : (
             <motion.div key={step.id} initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
@@ -767,7 +866,7 @@ export default function Plans() {
                   .filter(([k, v]) => v && (Array.isArray(v) ? v.length : true))
                   .map(([k, v]) => (
                     <span key={k} style={{ padding: '6px 12px', borderRadius: 20, background: 'rgba(110,231,183,0.15)', fontSize: 12, color: '#6EE7B7' }}>
-                      {formatWorkoutPrefLabel(v)}
+                      {k === 'currentTraining' ? 'Current training' : k === 'currentPhysique' ? 'Current physique' : formatWorkoutPrefLabel(v)}
                     </span>
                   ))}
                 {bodyGoalDescription?.trim() && (

@@ -6,6 +6,8 @@ import { motion } from 'framer-motion'
 import { supabase } from '../../lib/supabase'
 import { getTrainer } from '../../lib/trainers'
 import { useAuth } from '../components/AuthProvider'
+import BrandedAuthLoading from '../components/BrandedAuthLoading'
+import { useProfileResolutionTimeout } from '../hooks/useProfileResolutionTimeout'
 import ProgressChart from '../components/ProgressChart'
 import WeightModal from '../components/WeightModal'
 import TrainerModal from '../components/TrainerModal'
@@ -36,6 +38,7 @@ function hasUsableWorkoutPlan(workoutPlanRow) {
 export default function Dashboard() {
   const router = useRouter()
   const { user, profile: authProfile, loading: authLoading, profileLoading, refreshProfile } = useAuth()
+  const profileResolutionTimedOut = useProfileResolutionTimeout(user, authProfile, 3000)
   const [plans, setPlans] = useState({ workout: null, meal: null })
   const [weightLogs, setWeightLogs] = useState([])
   const [loading, setLoading] = useState(true)
@@ -58,11 +61,11 @@ export default function Dashboard() {
       router.push('/')
       return
     }
-    if (user && !authProfile && !profileLoading) {
+    if (user && !authProfile && !profileLoading && !authLoading) {
       router.push('/onboarding')
       return
     }
-  }, [user, authProfile, profileLoading, router])
+  }, [user, authProfile, profileLoading, authLoading, router])
 
   useEffect(() => {
     if (profile?.id) {
@@ -137,7 +140,7 @@ export default function Dashboard() {
         return
       }
 
-      const TIMEOUT_MS = 20000
+      const TIMEOUT_MS = 3000
       const queries = Promise.all([
         supabase
           .from('plans')
@@ -245,13 +248,58 @@ export default function Dashboard() {
     setTimeout(() => setToast(null), 2000)
   }
 
-  if (authLoading || profileLoading || loading || !profile) {
+  const showProfileStuckError =
+    user &&
+    !authProfile &&
+    profileResolutionTimedOut &&
+    (profileLoading || authLoading)
+
+  const showDashboardLoading =
+    !showProfileStuckError &&
+    (authLoading || profileLoading || loading || !profile)
+
+  if (showProfileStuckError) {
     return (
-      <div style={{ padding: 40, textAlign: 'center', color: '#2D5B3F' }}>
-        <motion.div animate={{ rotate: 360 }} transition={{ duration: 1, repeat: Infinity, ease: 'linear' }} style={{ fontSize: 32, marginBottom: 12 }}>🏋️</motion.div>
-        Loading your dashboard...
+      <div className="app-container" style={{ paddingTop: 48, paddingBottom: 32, textAlign: 'center' }}>
+        <p style={{ color: '#FB7185', fontSize: 15, fontWeight: 600, marginBottom: 12 }}>Couldn&apos;t load your profile</p>
+        <p style={{ color: '#2D5B3F', fontSize: 14, maxWidth: 360, margin: '0 auto 20px', lineHeight: 1.5 }}>
+          Check your connection or Supabase status, then try again.
+        </p>
+        <button
+          type="button"
+          onClick={() => refreshProfile()}
+          style={{
+            padding: '12px 24px',
+            borderRadius: 12,
+            border: '1px solid rgba(110,231,183,0.35)',
+            background: 'rgba(16,185,129,0.2)',
+            color: '#6EE7B7',
+            fontWeight: 600,
+            marginRight: 12,
+          }}
+        >
+          Retry
+        </button>
+        <button
+          type="button"
+          onClick={() => router.push('/')}
+          style={{
+            padding: '12px 24px',
+            borderRadius: 12,
+            border: '1px solid rgba(110,231,183,0.15)',
+            background: 'transparent',
+            color: '#A7C4B8',
+            fontWeight: 600,
+          }}
+        >
+          Home
+        </button>
       </div>
     )
+  }
+
+  if (showDashboardLoading) {
+    return <BrandedAuthLoading minHeight="70vh" />
   }
 
   const hasAnyPlan = !!(plans.workout || plans.meal)

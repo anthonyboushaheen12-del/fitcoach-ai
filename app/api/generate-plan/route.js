@@ -1,19 +1,22 @@
 import Anthropic from '@anthropic-ai/sdk'
-import { createClient } from '@supabase/supabase-js'
 import { getTrainer, buildSystemPrompt, buildOnboardingContextPrompt } from '../../../lib/trainers'
-
-function getSupabase() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
-  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
-  if (!url || !key) throw new Error('Missing Supabase env vars')
-  return createClient(url, key)
-}
+import { createSupabaseRouteClient } from '../../../lib/supabase-api-route'
 
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY || '',
 })
 
 export async function POST(request) {
+  let supabase
+  try {
+    supabase = createSupabaseRouteClient(request)
+  } catch (e) {
+    return Response.json(
+      { success: false, error: 'Database auth failed', details: e.message },
+      { status: 401 }
+    )
+  }
+
   try {
     const body = await request.json()
     const {
@@ -49,7 +52,6 @@ export async function POST(request) {
 
     const trainer = getTrainer(trainerId || profile?.trainer)
     const systemPrompt = buildSystemPrompt(trainer, profile) + buildOnboardingContextPrompt(onboardingContext || profile?.onboarding_context)
-    const supabase = getSupabase()
 
     const doWorkout = type === 'workout' || type === 'both'
     const doMeal = type === 'meal' || type === 'both'
@@ -81,25 +83,43 @@ export async function POST(request) {
     let mealPlan = null
 
     if (doWorkout) {
-      await supabase
+      const { error: offWErr } = await supabase
         .from('plans')
         .update({ active: false })
         .eq('profile_id', profileId)
         .eq('type', 'workout')
+      if (offWErr) {
+        return Response.json(
+          { success: false, error: 'Could not update workout plans', details: offWErr.message },
+          { status: 500 }
+        )
+      }
 
       const wp = workoutPreferences
       const bodyGoalLine = wp.bodyGoalDescription
         ? `\n- Physique / aesthetic goal (from user): ${wp.bodyGoalDescription}`
         : ''
+      const currentTrain =
+        typeof wp.currentTraining === 'string' && wp.currentTraining.trim()
+          ? wp.currentTraining.trim()
+          : 'Not specified — assume they may be new or changing programs.'
+      const currentPhys =
+        typeof wp.currentPhysique === 'string' && wp.currentPhysique.trim()
+          ? wp.currentPhysique.trim()
+          : 'Not specified.'
       const prefText = `
 Generate a complete workout plan for me based on my profile AND these specific preferences:${workoutActivityContext}
 
+- How they currently train / their program: ${currentTrain}
+- Their current physique (in their words): ${currentPhys}
 - Experience Level: ${wp.experience || 'intermediate'}
 - Available Days: ${wp.daysPerWeek || 4} days per week
 - Training Focus: ${Array.isArray(wp.focus) ? wp.focus.join(', ') : (wp.focus || 'overall muscle building')}
 - Equipment Available: ${Array.isArray(wp.equipment) ? wp.equipment.join(', ') : (wp.equipment || 'full gym')}
 - Session Duration: ${wp.sessionDuration || '45-60 minutes'}
 - Injuries/Limitations: ${wp.injuries || 'None'}${bodyGoalLine}
+
+Use their CURRENT training and physique to avoid redundant work, respect what already works, and progress sensibly from where they are now.
 `
 
       const workoutResponse = await anthropic.messages.create({
@@ -141,28 +161,46 @@ Include all days with all exercises. Make todayExercises match the first day.`,
         }
       }
 
-      await supabase.from('plans').insert({
+      const { error: insWErr } = await supabase.from('plans').insert({
         profile_id: profileId,
         type: 'workout',
         content: workoutPlan,
         trainer: trainerId || profile?.trainer,
         active: true,
       })
+      if (insWErr) {
+        return Response.json(
+          { success: false, error: 'Could not save workout plan', details: insWErr.message },
+          { status: 500 }
+        )
+      }
 
-      await supabase.from('profiles').update({
+      const { error: prefWErr } = await supabase.from('profiles').update({
         preferences: {
           ...(profile?.preferences || {}),
           workout: workoutPreferences,
         },
       }).eq('id', profileId)
+      if (prefWErr) {
+        return Response.json(
+          { success: false, error: 'Could not save workout preferences', details: prefWErr.message },
+          { status: 500 }
+        )
+      }
     }
 
     if (doMeal) {
-      await supabase
+      const { error: offMErr } = await supabase
         .from('plans')
         .update({ active: false })
         .eq('profile_id', profileId)
         .eq('type', 'meal')
+      if (offMErr) {
+        return Response.json(
+          { success: false, error: 'Could not update meal plans', details: offMErr.message },
+          { status: 500 }
+        )
+      }
 
       const mp = mealPreferences
       const mealBodyGoal = mp.bodyGoalDescription
@@ -223,20 +261,32 @@ Calculate appropriate calories and macros. Keep meals simple and practical.`,
         }
       }
 
-      await supabase.from('plans').insert({
+      const { error: insMErr } = await supabase.from('plans').insert({
         profile_id: profileId,
         type: 'meal',
         content: mealPlan,
         trainer: trainerId || profile?.trainer,
         active: true,
       })
+      if (insMErr) {
+        return Response.json(
+          { success: false, error: 'Could not save meal plan', details: insMErr.message },
+          { status: 500 }
+        )
+      }
 
-      await supabase.from('profiles').update({
+      const { error: prefMErr } = await supabase.from('profiles').update({
         preferences: {
           ...(profile?.preferences || {}),
           meal: mealPreferences,
         },
       }).eq('id', profileId)
+      if (prefMErr) {
+        return Response.json(
+          { success: false, error: 'Could not save meal preferences', details: prefMErr.message },
+          { status: 500 }
+        )
+      }
     }
 
     return Response.json({

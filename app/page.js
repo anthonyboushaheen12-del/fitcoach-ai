@@ -1,9 +1,10 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { motion } from 'framer-motion'
 import { useAuth } from './components/AuthProvider'
+import BrandedAuthLoading from './components/BrandedAuthLoading'
 import { supabase } from '../lib/supabase'
 
 export default function AuthPage() {
@@ -18,27 +19,10 @@ export default function AuthPage() {
   const [pendingConfirmation, setPendingConfirmation] = useState(null)
   const [resendSent, setResendSent] = useState(false)
   const [resending, setResending] = useState(false)
-  const [authWaitOverride, setAuthWaitOverride] = useState(false)
 
-  // Never block sign-in UI more than 5s if context hangs (AuthProvider also caps shell loading)
-  useEffect(() => {
-    const t = setTimeout(() => setAuthWaitOverride(true), 5000)
-    return () => clearTimeout(t)
-  }, [])
-
-  // Wait for auth and profile to resolve before redirecting
-  if ((authLoading || profileLoading) && !authWaitOverride) {
-    return (
-      <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: '#070B07', gap: 16 }}>
-        <div style={{ textAlign: 'center' }}>
-          <div style={{ fontSize: 32, fontWeight: 800, color: '#6EE7B7' }}>FitCoach<span style={{ color: '#fff' }}>AI</span></div>
-          <div style={{ width: 120, height: 3, borderRadius: 100, background: 'rgba(110,231,183,0.12)', overflow: 'hidden', margin: '16px auto 0' }}>
-            <div className="auth-loading-bar-inner" />
-          </div>
-          <div style={{ color: '#2D5B3F', fontSize: 13, marginTop: 12 }}>Loading...</div>
-        </div>
-      </div>
-    )
+  // Wait for auth + profile resolution — do not show sign-in until both are settled (avoids fake "signed out" flash).
+  if (authLoading || profileLoading) {
+    return <BrandedAuthLoading />
   }
 
   // Only redirect once profile has been resolved (not loading)

@@ -5,13 +5,16 @@ import { useRouter } from 'next/navigation'
 import { supabase } from '../../lib/supabase'
 import { getTrainer } from '../../lib/trainers'
 import { useAuth } from '../components/AuthProvider'
+import BrandedAuthLoading from '../components/BrandedAuthLoading'
+import { useProfileResolutionTimeout } from '../hooks/useProfileResolutionTimeout'
 import WeightModal from '../components/WeightModal'
 import TrainerModal from '../components/TrainerModal'
 import ProgressChart from '../components/ProgressChart'
 
 export default function Settings() {
   const router = useRouter()
-  const { user, profile: authProfile, refreshProfile, signOut } = useAuth()
+  const { user, profile: authProfile, refreshProfile, signOut, profileLoading, loading: authLoading } = useAuth()
+  const profileResolutionTimedOut = useProfileResolutionTimeout(user, authProfile, 3000)
   const [profile, setProfile] = useState(authProfile)
   const [weightLogs, setWeightLogs] = useState([])
   const [saving, setSaved] = useState(false)
@@ -21,8 +24,8 @@ export default function Settings() {
 
   useEffect(() => {
     if (!user) { router.push('/'); return }
-    if (user && !authProfile) { router.push('/onboarding'); return }
-  }, [user, authProfile, router])
+    if (user && !authProfile && !profileLoading && !authLoading) { router.push('/onboarding'); return }
+  }, [user, authProfile, profileLoading, authLoading, router])
 
   useEffect(() => {
     setProfile(authProfile)
@@ -34,14 +37,28 @@ export default function Settings() {
   }, [profile?.id])
 
   async function loadWeightLogs(profileId, currentWeight) {
-    const { data } = await supabase
-      .from('weight_logs')
-      .select('*')
-      .eq('profile_id', profileId)
-      .order('created_at', { ascending: true })
-      .limit(30)
+    if (!supabase) {
+      const today = new Date().toISOString().split('T')[0]
+      setWeightLogs([{ date: today, weight_kg: currentWeight }])
+      return
+    }
+    let data = null
+    try {
+      const res = await Promise.race([
+        supabase
+          .from('weight_logs')
+          .select('*')
+          .eq('profile_id', profileId)
+          .order('created_at', { ascending: true })
+          .limit(30),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 3000)),
+      ])
+      data = res?.data ?? null
+    } catch {
+      data = null
+    }
     const built = []
-    if (!data || data.length === 0) {
+    if (!data?.length) {
       built.push({ date: new Date().toISOString().split('T')[0], weight_kg: currentWeight })
     } else {
       data.forEach((l) => built.push({ date: (l.logged_at || l.created_at || '').split('T')[0], weight_kg: l.weight_kg }))
@@ -114,6 +131,58 @@ export default function Settings() {
     await supabase.from('profiles').delete().eq('id', profile.id)
     localStorage.clear()
     router.push('/')
+  }
+
+  const showProfileStuckError =
+    user &&
+    !authProfile &&
+    profileResolutionTimedOut &&
+    (profileLoading || authLoading)
+
+  const showSettingsLoading = !showProfileStuckError && !authProfile
+
+  if (showProfileStuckError) {
+    return (
+      <div className="app-container" style={{ paddingTop: 48, paddingBottom: 32, textAlign: 'center' }}>
+        <p style={{ color: '#FB7185', fontSize: 15, fontWeight: 600, marginBottom: 12 }}>Couldn&apos;t load your profile</p>
+        <p style={{ color: '#2D5B3F', fontSize: 14, maxWidth: 360, margin: '0 auto 20px', lineHeight: 1.5 }}>
+          Check your connection, then try again.
+        </p>
+        <button
+          type="button"
+          onClick={() => refreshProfile()}
+          style={{
+            padding: '12px 24px',
+            borderRadius: 12,
+            border: '1px solid rgba(110,231,183,0.35)',
+            background: 'rgba(16,185,129,0.2)',
+            color: '#6EE7B7',
+            fontWeight: 600,
+            marginRight: 12,
+          }}
+        >
+          Retry
+        </button>
+        <button
+          type="button"
+          onClick={() => router.push('/')}
+          style={{
+            padding: '12px 24px',
+            borderRadius: 12,
+            border: '1px solid rgba(110,231,183,0.15)',
+            background: 'transparent',
+            color: '#A7C4B8',
+            fontWeight: 600,
+          }}
+        >
+          Home
+        </button>
+      </div>
+    )
+  }
+
+  if (showSettingsLoading) {
+    return <BrandedAuthLoading minHeight="70vh" />
   }
 
   if (!profile) return null

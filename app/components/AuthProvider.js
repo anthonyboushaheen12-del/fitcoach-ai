@@ -3,6 +3,7 @@
 import { createContext, useContext, useEffect, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '../../lib/supabase'
+import BrandedAuthLoading from './BrandedAuthLoading'
 
 const AuthContext = createContext(null)
 
@@ -28,7 +29,7 @@ export function AuthProvider({ children }) {
   const fetchProfile = useCallback(async (userId) => {
     if (!supabase || !userId) return null
     const timeout = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error('Profile fetch timeout')), 8000)
+      setTimeout(() => reject(new Error('Profile fetch timeout')), 3000)
     )
     try {
       const { data } = await Promise.race([
@@ -41,39 +42,54 @@ export function AuthProvider({ children }) {
     }
   }, [])
 
+  const forceReleaseLoading = useCallback(() => {
+    setLoading(false)
+    setProfileLoading(false)
+    setShowFallback(false)
+  }, [])
+
   useEffect(() => {
     if (!supabase) {
       setLoading(false)
       return
     }
 
-    const AUTH_INIT_MS = 5000
+    const AUTH_INIT_MS = 3000
+    const race = (p, ms, label) =>
+      Promise.race([
+        p,
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error(`${label} timeout`)), ms)
+        ),
+      ])
+
     let cancelled = false
-    const timeout = setTimeout(() => {
+    const fallbackTimeout = setTimeout(() => {
+      if (!cancelled) setShowFallback(true)
+    }, AUTH_INIT_MS)
+
+    /** Last resort if initAuth never finishes (should not happen with raced getSession). */
+    const stuckWatchdog = setTimeout(() => {
       if (!cancelled) {
         setLoading(false)
         setProfileLoading(false)
       }
-    }, AUTH_INIT_MS)
-    const fallbackTimeout = setTimeout(() => {
-      if (!cancelled) setShowFallback(true)
-    }, 2800)
+    }, 15000)
 
     const initAuth = async () => {
       try {
         let u = null
         try {
-          const { data } = await Promise.race([
-            supabase.auth.getUser(),
-            new Promise((_, reject) =>
-              setTimeout(() => reject(new Error('getUser timeout')), AUTH_INIT_MS)
-            ),
-          ])
+          const { data } = await race(supabase.auth.getUser(), AUTH_INIT_MS, 'getUser')
           u = data?.user ?? null
         } catch (e) {
           console.warn('Auth getUser slow or failed, trying getSession:', e?.message)
           try {
-            const { data: sess } = await supabase.auth.getSession()
+            const { data: sess } = await race(
+              supabase.auth.getSession(),
+              AUTH_INIT_MS,
+              'getSession'
+            )
             u = sess?.session?.user ?? null
           } catch {
             u = null
@@ -96,7 +112,6 @@ export function AuthProvider({ children }) {
               localStorage.removeItem('profile')
             }
           } finally {
-            // Always clear — if we skip when cancelled, Strict Mode / fast unmount leaves profileLoading stuck true forever
             setProfileLoading(false)
           }
         } else {
@@ -108,8 +123,8 @@ export function AuthProvider({ children }) {
         console.error('Auth init error:', err)
       } finally {
         if (!cancelled) {
-          clearTimeout(timeout)
           clearTimeout(fallbackTimeout)
+          clearTimeout(stuckWatchdog)
           setLoading(false)
           setShowFallback(false)
         }
@@ -119,6 +134,9 @@ export function AuthProvider({ children }) {
     initAuth()
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      // INITIAL_SESSION often races with initAuth; a null first event clears the user and feels like "signed out".
+      if (event === 'INITIAL_SESSION') return
+
       const u = session?.user || null
       setUser(u)
       if (u) {
@@ -151,8 +169,8 @@ export function AuthProvider({ children }) {
 
     return () => {
       cancelled = true
-      clearTimeout(timeout)
       clearTimeout(fallbackTimeout)
+      clearTimeout(stuckWatchdog)
       subscription?.unsubscribe()
     }
   }, [fetchProfile])
@@ -200,58 +218,53 @@ export function AuthProvider({ children }) {
 
   if (loading) {
     return (
-      <AuthContext.Provider value={{ user, profile, loading, profileLoading, signIn, signUp, signOut, refreshProfile, fetchProfile }}>
-        <div style={{
-          minHeight: '100vh',
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-          background: '#070B07',
-          gap: 16,
-        }}>
-          <div style={{ textAlign: 'center' }}>
-            <div style={{ fontSize: 32, fontWeight: 800, color: '#6EE7B7' }}>
-              Fit<span style={{ color: '#fff' }}>Coach</span>
-              <span style={{
-                fontSize: 14,
-                marginLeft: 6,
-                background: 'linear-gradient(135deg, #F97316, #EC4899)',
-                WebkitBackgroundClip: 'text',
-                WebkitTextFillColor: 'transparent',
-              }}>AI</span>
+      <AuthContext.Provider
+        value={{
+          user,
+          profile,
+          loading,
+          profileLoading,
+          signIn,
+          signUp,
+          signOut,
+          refreshProfile,
+          fetchProfile,
+          forceReleaseLoading,
+        }}
+      >
+        <div style={{ position: 'relative', minHeight: '100vh' }}>
+          <BrandedAuthLoading />
+          {showFallback && (
+            <div
+              style={{
+                position: 'absolute',
+                left: 0,
+                right: 0,
+                bottom: '18%',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                gap: 12,
+              }}
+            >
+              <div style={{ color: '#6B7280', fontSize: 13 }}>Taking longer than expected?</div>
+              <button
+                type="button"
+                onClick={forceReleaseLoading}
+                style={{
+                  padding: '12px 28px',
+                  borderRadius: 12,
+                  border: '2px solid rgba(110,231,183,0.5)',
+                  background: 'rgba(16,185,129,0.25)',
+                  color: '#6EE7B7',
+                  fontSize: 15,
+                  fontWeight: 600,
+                }}
+              >
+                Continue anyway
+              </button>
             </div>
-            <div style={{
-              width: 120,
-              height: 3,
-              borderRadius: 100,
-              background: 'rgba(110,231,183,0.12)',
-              overflow: 'hidden',
-              margin: '16px auto 0',
-            }}>
-              <div className="auth-loading-bar-inner" />
-            </div>
-            <div style={{ color: '#2D5B3F', fontSize: 13, marginTop: 12 }}>Loading...</div>
-            {showFallback && (
-              <div style={{ marginTop: 24, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
-                <div style={{ color: '#6B7280', fontSize: 13 }}>Taking longer than expected?</div>
-                <button
-                  onClick={() => { setLoading(false); setProfileLoading(false); setShowFallback(false) }}
-                  style={{
-                    padding: '12px 28px',
-                    borderRadius: 12,
-                    border: '2px solid rgba(110,231,183,0.5)',
-                    background: 'rgba(16,185,129,0.25)',
-                    color: '#6EE7B7',
-                    fontSize: 15,
-                    fontWeight: 600,
-                  }}
-                >
-                  Continue anyway
-                </button>
-              </div>
-            )}
-          </div>
+          )}
         </div>
       </AuthContext.Provider>
     )
@@ -269,6 +282,7 @@ export function AuthProvider({ children }) {
         signOut,
         refreshProfile,
         fetchProfile,
+        forceReleaseLoading,
       }}
     >
       {children}

@@ -6,12 +6,15 @@ import { motion } from 'framer-motion'
 import { supabase } from '../../lib/supabase'
 import { getTrainer } from '../../lib/trainers'
 import { useAuth } from '../components/AuthProvider'
+import BrandedAuthLoading from '../components/BrandedAuthLoading'
+import { useProfileResolutionTimeout } from '../hooks/useProfileResolutionTimeout'
 import TypingIndicator from '../components/TypingIndicator'
 import QuickReplies from '../components/QuickReplies'
 
 function ChatContent() {
   const router = useRouter()
-  const { user, profile } = useAuth()
+  const { user, profile, profileLoading, refreshProfile, loading: authLoading } = useAuth()
+  const profileResolutionTimedOut = useProfileResolutionTimeout(user, profile, 3000)
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
@@ -28,11 +31,11 @@ function ChatContent() {
       router.push('/')
       return
     }
-    if (user && !profile) {
+    if (user && !profile && !profileLoading && !authLoading) {
       router.push('/onboarding')
       return
     }
-  }, [user, profile, router])
+  }, [user, profile, profileLoading, authLoading, router])
 
   useEffect(() => {
     if (searchParams.get('prompt') === 'body' && !input) {
@@ -49,12 +52,24 @@ function ChatContent() {
   }, [messages])
 
   async function loadChatHistory(profileId) {
-    const { data } = await supabase
+    if (!supabase) return
+    const q = supabase
       .from('chat_messages')
       .select('*')
       .eq('profile_id', profileId)
       .order('created_at', { ascending: true })
       .limit(50)
+
+    let data = null
+    try {
+      const res = await Promise.race([
+        q,
+        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 3000)),
+      ])
+      data = res?.data ?? null
+    } catch {
+      data = null
+    }
 
     if (data && data.length > 0) {
       setMessages(data.map(m => ({
@@ -168,6 +183,68 @@ function ChatContent() {
     } finally {
       setLoading(false)
     }
+  }
+
+  const showProfileStuckError =
+    user &&
+    !profile &&
+    profileResolutionTimedOut &&
+    (profileLoading || authLoading)
+
+  const showChatGateLoading =
+    user &&
+    !profile &&
+    !showProfileStuckError &&
+    (profileLoading || authLoading)
+
+  if (showProfileStuckError) {
+    return (
+      <div className="chat-page-root">
+        <div className="chat-page-inner" style={{ padding: 48, textAlign: 'center' }}>
+          <p style={{ color: '#FB7185', fontSize: 15, fontWeight: 600, marginBottom: 12 }}>Couldn&apos;t load your profile</p>
+          <p style={{ color: '#2D5B3F', fontSize: 14, maxWidth: 360, margin: '0 auto 20px', lineHeight: 1.5 }}>
+            Check your connection, then try again.
+          </p>
+          <button
+            type="button"
+            onClick={() => refreshProfile()}
+            style={{
+              padding: '12px 24px',
+              borderRadius: 12,
+              border: '1px solid rgba(110,231,183,0.35)',
+              background: 'rgba(16,185,129,0.2)',
+              color: '#6EE7B7',
+              fontWeight: 600,
+              marginRight: 12,
+            }}
+          >
+            Retry
+          </button>
+          <button
+            type="button"
+            onClick={() => router.push('/dashboard')}
+            style={{
+              padding: '12px 24px',
+              borderRadius: 12,
+              border: '1px solid rgba(110,231,183,0.15)',
+              background: 'transparent',
+              color: '#A7C4B8',
+              fontWeight: 600,
+            }}
+          >
+            Dashboard
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  if (showChatGateLoading) {
+    return (
+      <div className="chat-page-root">
+        <BrandedAuthLoading minHeight="70vh" style={{ flex: 1, width: '100%' }} />
+      </div>
+    )
   }
 
   if (!profile) return null
@@ -373,7 +450,7 @@ function ChatContent() {
 
 export default function Chat() {
   return (
-    <Suspense fallback={<div style={{ padding: 40, textAlign: 'center', color: '#2D5B3F' }}>Loading...</div>}>
+    <Suspense fallback={<BrandedAuthLoading minHeight="50vh" />}>
       <ChatContent />
     </Suspense>
   )

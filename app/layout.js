@@ -4,6 +4,7 @@ import './globals.css'
 import { useCallback } from 'react'
 import SplashScreen from './components/SplashScreen'
 import { AuthProvider } from './components/AuthProvider'
+import AuthLoadingSafetyNet from './components/AuthLoadingSafetyNet'
 import AppShell from './components/AppShell'
 
 export default function RootLayout({ children }) {
@@ -27,6 +28,7 @@ export default function RootLayout({ children }) {
         <SplashScreen onComplete={handleSplashComplete} />
 
         <AuthProvider>
+          <AuthLoadingSafetyNet />
           <AppShell>{children}</AppShell>
         </AuthProvider>
       </body>

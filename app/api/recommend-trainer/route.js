@@ -111,6 +111,8 @@ USER PROFILE:
 - Goal (in their words): ${profile.goal || 'Not specified'}
 
 WORKOUT PREFERENCES:
+- Current training / program: ${(typeof wp.currentTraining === 'string' && wp.currentTraining.trim()) ? wp.currentTraining.trim() : 'not specified'}
+- Current physique (self-described): ${(typeof wp.currentPhysique === 'string' && wp.currentPhysique.trim()) ? wp.currentPhysique.trim() : 'not specified'}
 - Experience: ${wp.experience || 'not specified'}
 - Days per week: ${wp.daysPerWeek ?? 'not specified'}
 - Focus areas: ${focusStr || 'not specified'}
