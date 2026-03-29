@@ -247,6 +247,11 @@ export default function Plans() {
   const [bodyAnalysis, setBodyAnalysis] = useState(null)
   const [bodyAnalysisStatus, setBodyAnalysisStatus] = useState('idle')
   const initialProgressPhotoSavedRef = useRef(false)
+  const [workoutEditMode, setWorkoutEditMode] = useState(false)
+  const [workoutDraft, setWorkoutDraft] = useState(null)
+  const [workoutSaveBusy, setWorkoutSaveBusy] = useState(false)
+  const [workoutSaveError, setWorkoutSaveError] = useState(null)
+  const workoutEditFromQueryRef = useRef(false)
 
   useEffect(() => {
     if (!user) { router.push('/'); return }
@@ -261,6 +266,20 @@ export default function Plans() {
     }
     if (start === 'meal') setView('meal-quiz')
   }, [searchParams])
+
+  useEffect(() => {
+    if (searchParams.get('edit') !== 'workout') {
+      workoutEditFromQueryRef.current = false
+      return
+    }
+    const aw = plans.find((p) => p.type === 'workout' && p.active)
+    if (!aw?.content || workoutEditFromQueryRef.current) return
+    workoutEditFromQueryRef.current = true
+    setView('overview')
+    setWorkoutEditMode(true)
+    setWorkoutDraft(JSON.parse(JSON.stringify(aw.content)))
+    setWorkoutSaveError(null)
+  }, [searchParams, plans])
 
   useEffect(() => {
     if (!profile?.id) return
@@ -625,8 +644,10 @@ export default function Plans() {
 
   const todayIdx = new Date().getDay()
   const todayStr = DAY_NAMES[todayIdx]
-  const workoutDays = activeWorkout?.content?.days || []
-  const split = activeWorkout?.content?.split || []
+  const workoutContentResolved =
+    workoutEditMode && workoutDraft ? workoutDraft : activeWorkout?.content
+  const workoutDays = workoutContentResolved?.days || []
+  const split = workoutContentResolved?.split || []
   let todayDayIndex = 0
   for (let i = 0; i < split.length; i++) {
     if (String(split[i]).startsWith(todayStr)) {
@@ -635,7 +656,83 @@ export default function Plans() {
     }
   }
   const todayWorkout = workoutDays[todayDayIndex] || workoutDays[0]
-  const todayExercises = todayWorkout?.exercises || activeWorkout?.content?.todayExercises || []
+  const todayExercises =
+    todayWorkout?.exercises || workoutContentResolved?.todayExercises || []
+
+  function patchWorkoutExercise(dayIdx, exIdx, patch) {
+    setWorkoutDraft((prev) => {
+      const source =
+        prev ||
+        (activeWorkout?.content ? JSON.parse(JSON.stringify(activeWorkout.content)) : null)
+      if (!source) return prev
+      const next = JSON.parse(JSON.stringify(source))
+      const inDays = next.days?.[dayIdx]?.exercises?.[exIdx]
+      if (inDays) {
+        const ex = next.days[dayIdx].exercises[exIdx]
+        if (patch.name != null) ex.name = patch.name
+        if (patch.sets != null) ex.sets = patch.sets
+        if (patch.rest != null) ex.rest = patch.rest
+        if (dayIdx === todayDayIndex && Array.isArray(next.todayExercises) && next.todayExercises[exIdx]) {
+          const t = next.todayExercises[exIdx]
+          if (patch.name != null) t.name = patch.name
+          if (patch.sets != null) t.sets = patch.sets
+          if (patch.rest != null) t.rest = patch.rest
+        }
+        return next
+      }
+      if (Array.isArray(next.todayExercises) && next.todayExercises[exIdx]) {
+        const ex = next.todayExercises[exIdx]
+        if (patch.name != null) ex.name = patch.name
+        if (patch.sets != null) ex.sets = patch.sets
+        if (patch.rest != null) ex.rest = patch.rest
+        return next
+      }
+      return prev
+    })
+  }
+
+  async function saveWorkoutEdits() {
+    if (!profile?.id || !workoutDraft) return
+    setWorkoutSaveBusy(true)
+    setWorkoutSaveError(null)
+    try {
+      const res = await fetch('/api/workout-plan', {
+        method: 'PATCH',
+        headers: await jsonHeadersWithAuth(),
+        body: JSON.stringify({ profileId: profile.id, content: workoutDraft }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok || !data.success) throw new Error(data.error || 'Save failed')
+      await loadPlans(profile.id)
+      setWorkoutEditMode(false)
+      setWorkoutDraft(null)
+      if (searchParams.get('edit') === 'workout') {
+        workoutEditFromQueryRef.current = false
+        router.replace('/plans')
+      }
+    } catch (e) {
+      setWorkoutSaveError(e?.message || 'Could not save')
+    } finally {
+      setWorkoutSaveBusy(false)
+    }
+  }
+
+  function enterWorkoutEdit() {
+    if (!activeWorkout?.content) return
+    setWorkoutDraft(JSON.parse(JSON.stringify(activeWorkout.content)))
+    setWorkoutEditMode(true)
+    setWorkoutSaveError(null)
+  }
+
+  function cancelWorkoutEdit() {
+    setWorkoutEditMode(false)
+    setWorkoutDraft(null)
+    setWorkoutSaveError(null)
+    if (searchParams.get('edit') === 'workout') {
+      workoutEditFromQueryRef.current = false
+      router.replace('/plans')
+    }
+  }
   const getCheckedCount = (exercises, dayIdx) =>
     exercises?.filter((_, exIdx) => checkedExercises[`${dayIdx}-${exIdx}`]).length || 0
   const todayChecked = getCheckedCount(todayExercises, todayDayIndex)
@@ -1285,19 +1382,56 @@ export default function Plans() {
 
       {activeWorkout ? (
         <div style={{ marginBottom: 20 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 10 }}>
             <span style={{ fontSize: 14, color: '#6EE7B7', fontWeight: 600 }}>Workout</span>
-            <button
-              type="button"
-              onClick={() => {
-                setWorkoutQuizStep(WORKOUT_QUIZ_BODY_STEP)
-                setView('workout-quiz')
-              }}
-              style={{ padding: '6px 12px', borderRadius: 10, border: '1px solid rgba(110,231,183,0.3)', background: 'transparent', color: '#6EE7B7', fontSize: 12, fontWeight: 600 }}
-            >
-              Regenerate Workout
-            </button>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, justifyContent: 'flex-end' }}>
+              {workoutEditMode ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={cancelWorkoutEdit}
+                    disabled={workoutSaveBusy}
+                    style={{ padding: '6px 12px', borderRadius: 10, border: '1px solid rgba(110,231,183,0.2)', background: 'transparent', color: '#A7C4B8', fontSize: 12, fontWeight: 600 }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={saveWorkoutEdits}
+                    disabled={workoutSaveBusy}
+                    style={{ padding: '6px 12px', borderRadius: 10, border: 'none', background: 'linear-gradient(135deg, #10B981, #6EE7B7)', color: '#070B07', fontSize: 12, fontWeight: 700, opacity: workoutSaveBusy ? 0.7 : 1 }}
+                  >
+                    {workoutSaveBusy ? 'Saving…' : 'Save changes'}
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={enterWorkoutEdit}
+                    style={{ padding: '6px 12px', borderRadius: 10, border: '1px solid rgba(110,231,183,0.35)', background: 'rgba(16,185,129,0.12)', color: '#6EE7B7', fontSize: 12, fontWeight: 600 }}
+                  >
+                    Edit exercises
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setWorkoutEditMode(false)
+                      setWorkoutDraft(null)
+                      setWorkoutQuizStep(WORKOUT_QUIZ_BODY_STEP)
+                      setView('workout-quiz')
+                    }}
+                    style={{ padding: '6px 12px', borderRadius: 10, border: '1px solid rgba(110,231,183,0.3)', background: 'transparent', color: '#6EE7B7', fontSize: 12, fontWeight: 600 }}
+                  >
+                    Regenerate Workout
+                  </button>
+                </>
+              )}
+            </div>
           </div>
+          {workoutSaveError && (
+            <div style={{ color: '#FB7185', fontSize: 12, marginBottom: 10 }}>{workoutSaveError}</div>
+          )}
           <div className="glass" style={{ padding: 0, overflow: 'hidden', border: '1px solid rgba(110,231,183,0.07)' }}>
             <div style={{ height: 3, background: 'linear-gradient(90deg, #10B981, #6EE7B7)' }} />
             <div style={{ padding: 20 }}>
@@ -1335,7 +1469,18 @@ export default function Plans() {
                   </div>
                   {allComplete && <div style={{ padding: 12, background: 'rgba(110,231,183,0.1)', borderRadius: 12, textAlign: 'center', marginBottom: 12, color: '#6EE7B7' }}>🎉 Workout Complete!</div>}
                   {todayExercises.map((ex, i) => (
-                    <ExerciseRow key={i} name={ex.name} sets={ex.sets} rest={ex.rest || '60s'} showCheckbox onToggle={() => toggleExercise(todayDayIndex, i)} isChecked={checkedExercises[`${todayDayIndex}-${i}`]} isLast={i >= todayExercises.length - 1} />
+                    <ExerciseRow
+                      key={i}
+                      name={ex.name}
+                      sets={ex.sets}
+                      rest={ex.rest || '60s'}
+                      showCheckbox
+                      onToggle={() => toggleExercise(todayDayIndex, i)}
+                      isChecked={checkedExercises[`${todayDayIndex}-${i}`]}
+                      isLast={i >= todayExercises.length - 1}
+                      editable={workoutEditMode}
+                      onFieldChange={(patch) => patchWorkoutExercise(todayDayIndex, i, patch)}
+                    />
                   ))}
                 </>
               ) : (
@@ -1358,7 +1503,18 @@ export default function Plans() {
                           <div style={{ padding: '0 14px 14px', borderTop: '1px solid rgba(110,231,183,0.06)' }}>
                             <WorkoutMuscleMap exerciseNames={exs.map((e) => e.name)} view="both" size="small" />
                             {exs.map((ex, exIdx) => (
-                              <ExerciseRow key={exIdx} name={ex.name} sets={ex.sets} rest={ex.rest || '60s'} showCheckbox onToggle={() => toggleExercise(dayIdx, exIdx)} isChecked={checkedExercises[`${dayIdx}-${exIdx}`]} isLast={exIdx >= exs.length - 1} />
+                              <ExerciseRow
+                                key={exIdx}
+                                name={ex.name}
+                                sets={ex.sets}
+                                rest={ex.rest || '60s'}
+                                showCheckbox
+                                onToggle={() => toggleExercise(dayIdx, exIdx)}
+                                isChecked={checkedExercises[`${dayIdx}-${exIdx}`]}
+                                isLast={exIdx >= exs.length - 1}
+                                editable={workoutEditMode}
+                                onFieldChange={(patch) => patchWorkoutExercise(dayIdx, exIdx, patch)}
+                              />
                             ))}
                           </div>
                         )}

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
 import { compressImageForUpload } from '../../lib/image-compress'
 
@@ -19,7 +19,15 @@ export default function PhotoUploadModal({ isOpen, onClose, profile, onSaved }) 
   const [weight, setWeight] = useState(profile?.weight_kg ?? '')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [justSaved, setJustSaved] = useState(false)
   const inputRef = useRef(null)
+
+  useEffect(() => {
+    if (!isOpen || !profile) return
+    setJustSaved(false)
+    setError('')
+    setWeight(profile.weight_kg ?? '')
+  }, [isOpen, profile?.id, profile?.weight_kg])
 
   if (!isOpen || !profile?.id) return null
 
@@ -57,12 +65,22 @@ export default function PhotoUploadModal({ isOpen, onClose, profile, onSaved }) 
       }
       setNotes('')
       onSaved?.()
-      onClose?.()
+      setJustSaved(true)
     } catch (err) {
       setError(err?.message || 'Something went wrong')
     } finally {
       setBusy(false)
     }
+  }
+
+  function handleAddAnother() {
+    setJustSaved(false)
+    setError('')
+  }
+
+  function handleDone() {
+    setJustSaved(false)
+    onClose?.()
   }
 
   return (
@@ -93,7 +111,7 @@ export default function PhotoUploadModal({ isOpen, onClose, profile, onSaved }) 
         onClick={(e) => e.stopPropagation()}
       >
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-          <div style={{ fontSize: 17, fontWeight: 700, color: '#fff' }}>Add progress photo</div>
+          <div style={{ fontSize: 17, fontWeight: 700, color: '#fff' }}>Progress photo</div>
           <button type="button" onClick={onClose} style={{ background: 'none', border: 'none', color: '#2D5B3F', fontSize: 20 }}>
             ✕
           </button>
@@ -157,23 +175,76 @@ export default function PhotoUploadModal({ isOpen, onClose, profile, onSaved }) 
         />
         <input ref={inputRef} type="file" accept="image/jpeg,image/png,image/webp" style={{ display: 'none' }} onChange={handleFile} />
         {error && <div style={{ color: '#FB7185', fontSize: 13, marginBottom: 10 }}>{error}</div>}
-        <button
-          type="button"
-          disabled={busy}
-          onClick={() => inputRef.current?.click()}
-          style={{
-            width: '100%',
-            padding: 14,
-            borderRadius: 14,
-            border: 'none',
-            background: busy ? 'rgba(110,231,183,0.2)' : 'linear-gradient(135deg, #10B981, #6EE7B7)',
-            color: '#070B07',
-            fontSize: 15,
-            fontWeight: 700,
-          }}
-        >
-          {busy ? 'Analyzing & saving…' : 'Choose photo — analyze & save'}
-        </button>
+        {justSaved ? (
+          <div>
+            <div
+              style={{
+                padding: 14,
+                borderRadius: 12,
+                background: 'rgba(16,185,129,0.12)',
+                border: '1px solid rgba(110,231,183,0.2)',
+                color: '#6EE7B7',
+                fontSize: 14,
+                fontWeight: 600,
+                textAlign: 'center',
+                marginBottom: 12,
+              }}
+            >
+              Saved. You can add as many progress photos as you like.
+            </div>
+            <button
+              type="button"
+              onClick={handleAddAnother}
+              style={{
+                width: '100%',
+                padding: 14,
+                borderRadius: 14,
+                border: 'none',
+                background: 'linear-gradient(135deg, #10B981, #6EE7B7)',
+                color: '#070B07',
+                fontSize: 15,
+                fontWeight: 700,
+                marginBottom: 8,
+              }}
+            >
+              Add another photo
+            </button>
+            <button
+              type="button"
+              onClick={handleDone}
+              style={{
+                width: '100%',
+                padding: 12,
+                borderRadius: 12,
+                border: '1px solid rgba(110,231,183,0.2)',
+                background: 'transparent',
+                color: '#A7C4B8',
+                fontSize: 14,
+                fontWeight: 600,
+              }}
+            >
+              Done
+            </button>
+          </div>
+        ) : (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => inputRef.current?.click()}
+            style={{
+              width: '100%',
+              padding: 14,
+              borderRadius: 14,
+              border: 'none',
+              background: busy ? 'rgba(110,231,183,0.2)' : 'linear-gradient(135deg, #10B981, #6EE7B7)',
+              color: '#070B07',
+              fontSize: 15,
+              fontWeight: 700,
+            }}
+          >
+            {busy ? 'Analyzing & saving…' : 'Choose photo — analyze & save'}
+          </button>
+        )}
       </div>
     </div>
   )

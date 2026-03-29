@@ -845,11 +845,17 @@ export default function Dashboard() {
             padding: '16px 18px',
             display: 'flex',
             justifyContent: 'space-between',
-            alignItems: 'center',
+            alignItems: 'flex-start',
+            gap: 12,
             borderBottom: '1px solid rgba(110,231,183,0.05)',
           }}
         >
-          <div style={{ fontSize: 16, fontWeight: 700, color: '#fff' }}>Progress photos</div>
+          <div>
+            <div style={{ fontSize: 16, fontWeight: 700, color: '#fff' }}>Progress photos</div>
+            <div style={{ fontSize: 11, color: '#4A6B58', marginTop: 4, lineHeight: 1.4 }}>
+              Add new check-in photos whenever you want — same angles help comparisons.
+            </div>
+          </div>
           <button
             type="button"
             onClick={() => setPhotoModalOpen(true)}
@@ -861,6 +867,7 @@ export default function Dashboard() {
               color: '#6EE7B7',
               fontSize: 11,
               fontWeight: 700,
+              flexShrink: 0,
             }}
           >
             + Add photo
@@ -949,6 +956,25 @@ export default function Dashboard() {
               >
                 Start Workout →
               </button>
+              {hasWorkoutPlan && (
+                <button
+                  type="button"
+                  onClick={() => router.push('/plans?edit=workout')}
+                  style={{
+                    width: '100%',
+                    marginTop: 10,
+                    padding: 12,
+                    borderRadius: 12,
+                    border: '1px solid rgba(110,231,183,0.25)',
+                    background: 'rgba(16,185,129,0.08)',
+                    color: '#6EE7B7',
+                    fontSize: 14,
+                    fontWeight: 600,
+                  }}
+                >
+                  Edit trainer workout (exercises)
+                </button>
+              )}
             </div>
           </div>
         ) : (

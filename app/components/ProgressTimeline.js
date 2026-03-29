@@ -4,12 +4,30 @@ export default function ProgressTimeline({ photos, onAdd, onSelectPhoto }) {
   if (!photos?.length) {
     return (
       <div style={{ padding: '24px 18px', textAlign: 'center' }}>
-        <div style={{ fontSize: 13, color: '#2D5B3F' }}>Take your first progress photo to track changes</div>
+        <div style={{ fontSize: 13, color: '#2D5B3F', marginBottom: 14 }}>
+          Take your first progress photo to track changes. You can upload new ones anytime.
+        </div>
+        <button
+          type="button"
+          onClick={() => onAdd?.()}
+          style={{
+            padding: '12px 20px',
+            borderRadius: 12,
+            border: 'none',
+            background: 'linear-gradient(135deg, #10B981, #6EE7B7)',
+            color: '#070B07',
+            fontSize: 14,
+            fontWeight: 700,
+          }}
+        >
+          Upload progress photo
+        </button>
       </div>
     )
   }
 
   return (
+    <div>
     <div
       style={{
         padding: '12px 18px',
@@ -75,6 +93,36 @@ export default function ProgressTimeline({ photos, onAdd, onSelectPhoto }) {
           </div>
         </button>
       ))}
+    </div>
+    <div
+      style={{
+        padding: '0 18px 14px',
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        flexWrap: 'wrap',
+        gap: 8,
+      }}
+    >
+      <span style={{ fontSize: 11, color: '#4A6B58' }}>
+        {photos.length} photo{photos.length !== 1 ? 's' : ''} — add more whenever you want
+      </span>
+      <button
+        type="button"
+        onClick={() => onAdd?.()}
+        style={{
+          padding: '6px 12px',
+          borderRadius: 100,
+          background: 'rgba(110,231,183,0.1)',
+          border: '1px solid rgba(110,231,183,0.2)',
+          color: '#6EE7B7',
+          fontSize: 11,
+          fontWeight: 700,
+        }}
+      >
+        + Add photo
+      </button>
+    </div>
     </div>
   )
 }
