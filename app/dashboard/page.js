@@ -87,16 +87,17 @@ export default function Dashboard() {
     }
   }, [user, authProfile, profileLoading, authLoading, router])
 
+  const missingProfileId = Boolean(profile) && !profile?.id
+
   useEffect(() => {
     if (profile?.id) {
       loadPlansAndWeightLogs()
       return
     }
-    // Profile object without id (bad cache): loadPlans never runs → don't spin forever
-    if (user && profile != null && !profileLoading && !profile.id) {
+    if (user && !profileLoading && missingProfileId) {
       setLoading(false)
     }
-  }, [user, profile, profile?.id, profileLoading])
+  }, [user, profile?.id, profileLoading, missingProfileId])
 
   useEffect(() => {
     if (!profile?.id) return
@@ -162,13 +163,16 @@ export default function Dashboard() {
     return built
   }
 
-  async function loadPlansAndWeightLogs() {
+  async function loadPlansAndWeightLogs(options = { showLoading: true }) {
+    const showLoading = options?.showLoading !== false
     if (!profile?.id) {
       setLoading(false)
       return
     }
     const profileId = profile.id
     const profileRow = profile
+
+    if (showLoading) setLoading(true)
 
     try {
       if (!supabase) {
@@ -319,7 +323,7 @@ export default function Dashboard() {
       if (!res.ok || !data.success) {
         throw new Error(data.error || data.details || `Could not update your program (${res.status}).`)
       }
-      await Promise.all([loadPlansAndWeightLogs(), refreshProfile()])
+      await Promise.all([loadPlansAndWeightLogs({ showLoading: false }), refreshProfile()])
       setProgramAdjustText('')
       setToast('Program updated from your notes')
       setTimeout(() => setToast(null), 2500)
@@ -338,7 +342,7 @@ export default function Dashboard() {
 
   const showDashboardLoading =
     !showProfileStuckError &&
-    (authLoading || profileLoading || loading || !profile)
+    (authLoading || (!profile?.id && profileLoading) || !profile)
 
   if (showProfileStuckError) {
     return (
@@ -386,6 +390,166 @@ export default function Dashboard() {
 
   const hasAnyPlan = !!(plans.workout || plans.meal)
   const greeting = getGreeting(profile.name?.split(' ')[0] || 'there')
+  const cardDelaysPre = [0, 100, 200, 300, 400, 500, 600, 700]
+  const skeletonPulse = {
+    animation: 'pulse 1.2s ease-in-out infinite',
+    borderRadius: 12,
+    background: 'rgba(110,231,183,0.12)',
+  }
+
+  if (loading && profile?.id) {
+    const skTrainer = profile ? getTrainer(profile.trainer) : getTrainer('bro')
+    return (
+      <div className="app-container" style={{ paddingTop: 18, paddingBottom: 24 }}>
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: cardDelaysPre[0] }}
+          style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}
+        >
+          <div>
+            <h1 style={{ fontSize: 22, fontWeight: 800, letterSpacing: -0.8 }}>
+              <span style={{ color: '#6EE7B7' }}>Fit</span>
+              <span style={{ color: '#fff' }}>Coach</span>
+              <span className="gradient-accent" style={{ fontSize: 12, fontWeight: 600, marginLeft: 6 }}>AI</span>
+            </h1>
+            <p style={{ fontSize: 14, color: '#D1FAE5', fontWeight: 500, marginTop: 4 }}>
+              {greeting.text} {greeting.emoji}
+            </p>
+            <p style={{ fontSize: 12, fontWeight: 600, marginTop: 6, color: '#6B8F7A' }}>
+              Loading your plan and stats…
+            </p>
+          </div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', flexShrink: 0 }}>
+            <button
+              type="button"
+              aria-label="Add progress photo"
+              onClick={() => setPhotoModalOpen(true)}
+              style={{
+                width: 48,
+                height: 48,
+                borderRadius: 16,
+                background: 'rgba(14,20,14,0.55)',
+                backdropFilter: 'blur(24px)',
+                border: '1px solid rgba(110,231,183,0.1)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: 22,
+                cursor: 'pointer',
+              }}
+            >
+              📷
+            </button>
+            <button
+              type="button"
+              onClick={() => setTrainerModalOpen(true)}
+              style={{
+                width: 48,
+                height: 48,
+                borderRadius: 16,
+                background: 'rgba(14,20,14,0.55)',
+                backdropFilter: 'blur(24px)',
+                border: '1px solid rgba(110,231,183,0.1)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: 24,
+                cursor: 'pointer',
+              }}
+            >
+              {skTrainer.emoji}
+            </button>
+          </div>
+        </motion.div>
+
+        <div className="card-grid" style={{ marginBottom: 14 }}>
+          {[1, 2, 3].map((i) => (
+            <div key={i} className="glass" style={{ padding: 18, borderTop: '3px solid rgba(110,231,183,0.15)' }}>
+              <div style={{ ...skeletonPulse, height: 10, width: '40%', marginBottom: 12 }} />
+              <div style={{ ...skeletonPulse, height: 22, width: '55%' }} />
+            </div>
+          ))}
+        </div>
+
+        <div className="glass" style={{ padding: 0, marginBottom: 14, overflow: 'hidden' }}>
+          <div
+            style={{
+              padding: '16px 18px',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'flex-start',
+              gap: 12,
+              borderBottom: '1px solid rgba(110,231,183,0.05)',
+            }}
+          >
+            <div>
+              <div style={{ fontSize: 16, fontWeight: 700, color: '#fff' }}>Progress photos</div>
+              <div style={{ fontSize: 11, color: '#4A6B58', marginTop: 4, lineHeight: 1.4 }}>
+                Add new check-in photos whenever you want — same angles help comparisons.
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setPhotoModalOpen(true)}
+              style={{
+                padding: '6px 14px',
+                borderRadius: 100,
+                background: 'rgba(110,231,183,0.1)',
+                border: '1px solid rgba(110,231,183,0.15)',
+                color: '#6EE7B7',
+                fontSize: 11,
+                fontWeight: 700,
+                flexShrink: 0,
+              }}
+            >
+              + Add photo
+            </button>
+          </div>
+          <ProgressTimeline
+            photos={progressPhotos}
+            onAdd={() => setPhotoModalOpen(true)}
+            onSelectPhoto={() => {
+              if (progressPhotos.length >= 2) setCompareOpen(true)
+            }}
+          />
+          {progressPhotos.length >= 2 && (
+            <div style={{ padding: '0 18px 16px' }}>
+              <div style={{ fontSize: 12, color: '#2D5B3F', fontWeight: 600, marginBottom: 8 }}>Body fat trend (estimated)</div>
+              <BodyFatLineChart photos={progressPhotos} height={140} />
+            </div>
+          )}
+        </div>
+
+        <div className="glass" style={{ padding: 20, marginBottom: 14 }}>
+          <div style={{ ...skeletonPulse, height: 14, width: '70%', marginBottom: 14 }} />
+          <div style={{ ...skeletonPulse, height: 10, width: '100%', marginBottom: 10 }} />
+          <div style={{ ...skeletonPulse, height: 10, width: '90%', marginBottom: 10 }} />
+          <div style={{ ...skeletonPulse, height: 10, width: '85%' }} />
+        </div>
+
+        <PhotoUploadModal
+          isOpen={photoModalOpen}
+          onClose={() => setPhotoModalOpen(false)}
+          profile={profile}
+          onSaved={loadProgressPhotos}
+        />
+        <CompareModal
+          isOpen={compareOpen}
+          onClose={() => setCompareOpen(false)}
+          photos={progressPhotos}
+          profile={profile}
+        />
+        <TrainerModal
+          open={trainerModalOpen}
+          onClose={() => setTrainerModalOpen(false)}
+          profile={profile}
+          currentTrainer={skTrainer}
+          onSelect={handleSelectTrainer}
+        />
+      </div>
+    )
+  }
 
   if (!hasAnyPlan) {
     const headerPhotoBtnStyle = {

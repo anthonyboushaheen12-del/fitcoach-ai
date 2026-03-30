@@ -140,7 +140,8 @@ export function AuthProvider({ children }) {
       const u = session?.user || null
       setUser(u)
       if (u) {
-        setProfileLoading(true)
+        const isTokenRefresh = event === 'TOKEN_REFRESHED'
+        if (!isTokenRefresh) setProfileLoading(true)
         try {
           const p = await fetchProfile(u.id)
           const merged = p ?? readCachedProfileForUser(u.id)
@@ -154,7 +155,7 @@ export function AuthProvider({ children }) {
             localStorage.setItem('profile', JSON.stringify(merged))
           }
         } finally {
-          setProfileLoading(false)
+          if (!isTokenRefresh) setProfileLoading(false)
         }
       } else {
         setProfile(null)
