@@ -205,6 +205,32 @@ input:focus, textarea:focus, select:focus {
   padding: 0 24px;
 }
 
+/* Dashboard: inset column on phones so content isn’t edge-to-edge */
+.dashboard-app-container {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: min(1200px, calc(100vw - 20px));
+  margin-left: auto;
+  margin-right: auto;
+  padding-left: max(12px, env(safe-area-inset-left, 0px));
+  padding-right: max(12px, env(safe-area-inset-right, 0px));
+}
+
+@media (min-width: 768px) {
+  .dashboard-app-container {
+    max-width: 1200px;
+    padding-left: max(40px, env(safe-area-inset-left, 0px));
+    padding-right: max(40px, env(safe-area-inset-right, 0px));
+  }
+}
+
+@media (min-width: 1024px) {
+  .dashboard-app-container {
+    padding-left: max(60px, env(safe-area-inset-left, 0px));
+    padding-right: max(60px, env(safe-area-inset-right, 0px));
+  }
+}
+
 .card-grid {
   display: grid;
   grid-template-columns: 1fr;

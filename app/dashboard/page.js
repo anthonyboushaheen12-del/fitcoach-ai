@@ -346,7 +346,7 @@ export default function Dashboard() {
 
   if (showProfileStuckError) {
     return (
-      <div className="app-container" style={{ paddingTop: 48, paddingBottom: 32, textAlign: 'center' }}>
+      <div className="dashboard-app-container" style={{ paddingTop: 48, paddingBottom: 32, textAlign: 'center' }}>
         <p style={{ color: '#FB7185', fontSize: 15, fontWeight: 600, marginBottom: 12 }}>Couldn&apos;t load your profile</p>
         <p style={{ color: '#2D5B3F', fontSize: 14, maxWidth: 360, margin: '0 auto 20px', lineHeight: 1.5 }}>
           Check your connection or Supabase status, then try again.
@@ -400,7 +400,7 @@ export default function Dashboard() {
   if (loading && profile?.id) {
     const skTrainer = profile ? getTrainer(profile.trainer) : getTrainer('bro')
     return (
-      <div className="app-container" style={{ paddingTop: 18, paddingBottom: 24 }}>
+      <div className="dashboard-app-container" style={{ paddingTop: 18, paddingBottom: 24 }}>
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -567,7 +567,7 @@ export default function Dashboard() {
       cursor: 'pointer',
     }
     return (
-      <div className="app-container" style={{ paddingTop: 24, paddingBottom: 32 }}>
+      <div className="dashboard-app-container" style={{ paddingTop: 24, paddingBottom: 32 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, marginBottom: 24 }}>
           <div>
             <h1 style={{ fontSize: 26, fontWeight: 800, letterSpacing: -0.8 }}>
@@ -736,7 +736,7 @@ export default function Dashboard() {
   const cardDelays = [0, 100, 200, 300, 400, 500, 600, 700]
 
   return (
-    <div className="app-container" style={{ paddingTop: 18, paddingBottom: 24 }}>
+    <div className="dashboard-app-container" style={{ paddingTop: 18, paddingBottom: 24 }}>
       {/* Toast */}
       {toast && (
         <motion.div
