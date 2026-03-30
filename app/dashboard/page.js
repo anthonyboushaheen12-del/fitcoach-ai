@@ -388,9 +388,23 @@ export default function Dashboard() {
   const greeting = getGreeting(profile.name?.split(' ')[0] || 'there')
 
   if (!hasAnyPlan) {
+    const headerPhotoBtnStyle = {
+      width: 48,
+      height: 48,
+      borderRadius: 16,
+      background: 'rgba(14,20,14,0.55)',
+      backdropFilter: 'blur(24px)',
+      border: '1px solid rgba(110,231,183,0.1)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      fontSize: 22,
+      flexShrink: 0,
+      cursor: 'pointer',
+    }
     return (
       <div className="app-container" style={{ paddingTop: 24, paddingBottom: 32 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, marginBottom: 24 }}>
           <div>
             <h1 style={{ fontSize: 26, fontWeight: 800, letterSpacing: -0.8 }}>
               <span style={{ color: '#6EE7B7' }}>Fit</span>
@@ -401,7 +415,79 @@ export default function Dashboard() {
               {greeting.text} {greeting.emoji}
             </p>
           </div>
+          <button
+            type="button"
+            aria-label="Add progress photo"
+            onClick={() => setPhotoModalOpen(true)}
+            style={headerPhotoBtnStyle}
+          >
+            📷
+          </button>
         </div>
+
+        <div
+          className="glass"
+          style={{ padding: 0, marginBottom: 24, overflow: 'hidden', border: '1px solid rgba(110,231,183,0.12)' }}
+        >
+          <div
+            style={{
+              padding: '16px 18px',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'flex-start',
+              gap: 12,
+              borderBottom: '1px solid rgba(110,231,183,0.05)',
+            }}
+          >
+            <div>
+              <div style={{ fontSize: 16, fontWeight: 700, color: '#fff' }}>Progress photos</div>
+              <div style={{ fontSize: 11, color: '#4A6B58', marginTop: 4, lineHeight: 1.4 }}>
+                Add new check-in photos whenever you want — same angles help comparisons.
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setPhotoModalOpen(true)}
+              style={{
+                padding: '6px 14px',
+                borderRadius: 100,
+                background: 'rgba(110,231,183,0.1)',
+                border: '1px solid rgba(110,231,183,0.15)',
+                color: '#6EE7B7',
+                fontSize: 11,
+                fontWeight: 700,
+                flexShrink: 0,
+              }}
+            >
+              + Add photo
+            </button>
+          </div>
+          <ProgressTimeline
+            photos={progressPhotos}
+            onAdd={() => setPhotoModalOpen(true)}
+            onSelectPhoto={() => {
+              if (progressPhotos.length >= 2) setCompareOpen(true)
+            }}
+          />
+          {progressPhotos.length >= 2 && (
+            <div style={{ padding: '0 18px 16px' }}>
+              <div style={{ fontSize: 12, color: '#2D5B3F', fontWeight: 600, marginBottom: 8 }}>Body fat trend (estimated)</div>
+              <BodyFatLineChart photos={progressPhotos} height={140} />
+            </div>
+          )}
+        </div>
+        <PhotoUploadModal
+          isOpen={photoModalOpen}
+          onClose={() => setPhotoModalOpen(false)}
+          profile={profile}
+          onSaved={loadProgressPhotos}
+        />
+        <CompareModal
+          isOpen={compareOpen}
+          onClose={() => setCompareOpen(false)}
+          photos={progressPhotos}
+          profile={profile}
+        />
 
         <div
           className="glass"
@@ -455,63 +541,6 @@ export default function Dashboard() {
             </button>
           </div>
         </div>
-
-        <div
-          className="glass"
-          style={{ padding: 0, marginBottom: 24, overflow: 'hidden', border: '1px solid rgba(110,231,183,0.12)' }}
-        >
-          <div
-            style={{
-              padding: '14px 18px',
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              borderBottom: '1px solid rgba(110,231,183,0.05)',
-            }}
-          >
-            <div style={{ fontSize: 15, fontWeight: 700, color: '#fff' }}>Progress photos</div>
-            <button
-              type="button"
-              onClick={() => setPhotoModalOpen(true)}
-              style={{
-                padding: '6px 14px',
-                borderRadius: 100,
-                background: 'rgba(110,231,183,0.1)',
-                border: '1px solid rgba(110,231,183,0.15)',
-                color: '#6EE7B7',
-                fontSize: 11,
-                fontWeight: 700,
-              }}
-            >
-              + Add photo
-            </button>
-          </div>
-          <ProgressTimeline
-            photos={progressPhotos}
-            onAdd={() => setPhotoModalOpen(true)}
-            onSelectPhoto={() => {
-              if (progressPhotos.length >= 2) setCompareOpen(true)
-            }}
-          />
-          {progressPhotos.length >= 2 && (
-            <div style={{ padding: '0 18px 16px' }}>
-              <div style={{ fontSize: 12, color: '#2D5B3F', fontWeight: 600, marginBottom: 8 }}>Body fat trend (estimated)</div>
-              <BodyFatLineChart photos={progressPhotos} height={140} />
-            </div>
-          )}
-        </div>
-        <PhotoUploadModal
-          isOpen={photoModalOpen}
-          onClose={() => setPhotoModalOpen(false)}
-          profile={profile}
-          onSaved={loadProgressPhotos}
-        />
-        <CompareModal
-          isOpen={compareOpen}
-          onClose={() => setCompareOpen(false)}
-          photos={progressPhotos}
-          profile={profile}
-        />
 
         <div className="card-grid">
           {[
@@ -603,23 +632,47 @@ export default function Dashboard() {
             </p>
           )}
         </div>
-        <button
-          onClick={() => setTrainerModalOpen(true)}
-          style={{
-            width: 48,
-            height: 48,
-            borderRadius: 16,
-            background: 'rgba(14,20,14,0.55)',
-            backdropFilter: 'blur(24px)',
-            border: '1px solid rgba(110,231,183,0.1)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            fontSize: 24,
-          }}
-        >
-          {trainer.emoji}
-        </button>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', flexShrink: 0 }}>
+          <button
+            type="button"
+            aria-label="Add progress photo"
+            onClick={() => setPhotoModalOpen(true)}
+            style={{
+              width: 48,
+              height: 48,
+              borderRadius: 16,
+              background: 'rgba(14,20,14,0.55)',
+              backdropFilter: 'blur(24px)',
+              border: '1px solid rgba(110,231,183,0.1)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: 22,
+              cursor: 'pointer',
+            }}
+          >
+            📷
+          </button>
+          <button
+            type="button"
+            onClick={() => setTrainerModalOpen(true)}
+            style={{
+              width: 48,
+              height: 48,
+              borderRadius: 16,
+              background: 'rgba(14,20,14,0.55)',
+              backdropFilter: 'blur(24px)',
+              border: '1px solid rgba(110,231,183,0.1)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: 24,
+              cursor: 'pointer',
+            }}
+          >
+            {trainer.emoji}
+          </button>
+        </div>
       </motion.div>
 
       {!hasWorkoutPlan && (
@@ -691,6 +744,74 @@ export default function Dashboard() {
           </div>
         </div>
       </motion.div>
+
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: cardDelays[1] + 40 }}
+        className="glass"
+        style={{ padding: 0, marginBottom: 14, overflow: 'hidden' }}
+      >
+        <div
+          style={{
+            padding: '16px 18px',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'flex-start',
+            gap: 12,
+            borderBottom: '1px solid rgba(110,231,183,0.05)',
+          }}
+        >
+          <div>
+            <div style={{ fontSize: 16, fontWeight: 700, color: '#fff' }}>Progress photos</div>
+            <div style={{ fontSize: 11, color: '#4A6B58', marginTop: 4, lineHeight: 1.4 }}>
+              Add new check-in photos whenever you want — same angles help comparisons.
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setPhotoModalOpen(true)}
+            style={{
+              padding: '6px 14px',
+              borderRadius: 100,
+              background: 'rgba(110,231,183,0.1)',
+              border: '1px solid rgba(110,231,183,0.15)',
+              color: '#6EE7B7',
+              fontSize: 11,
+              fontWeight: 700,
+              flexShrink: 0,
+            }}
+          >
+            + Add photo
+          </button>
+        </div>
+        <ProgressTimeline
+          photos={progressPhotos}
+          onAdd={() => setPhotoModalOpen(true)}
+          onSelectPhoto={() => {
+            if (progressPhotos.length >= 2) setCompareOpen(true)
+          }}
+        />
+        {progressPhotos.length >= 2 && (
+          <div style={{ padding: '0 18px 16px' }}>
+            <div style={{ fontSize: 12, color: '#2D5B3F', fontWeight: 600, marginBottom: 8 }}>Body fat trend (estimated)</div>
+            <BodyFatLineChart photos={progressPhotos} height={140} />
+          </div>
+        )}
+      </motion.div>
+
+      <PhotoUploadModal
+        isOpen={photoModalOpen}
+        onClose={() => setPhotoModalOpen(false)}
+        profile={profile}
+        onSaved={loadProgressPhotos}
+      />
+      <CompareModal
+        isOpen={compareOpen}
+        onClose={() => setCompareOpen(false)}
+        photos={progressPhotos}
+        profile={profile}
+      />
 
       {/* Adjust program (free-form) */}
       <motion.div
@@ -832,74 +953,6 @@ export default function Dashboard() {
         </div>
         <ProgressChart data={weightLogs} targetWeight={profile.target_weight} height={chartHeight} />
       </motion.div>
-
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: cardDelays[2] }}
-        className="glass"
-        style={{ padding: 0, marginBottom: 14, overflow: 'hidden' }}
-      >
-        <div
-          style={{
-            padding: '16px 18px',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'flex-start',
-            gap: 12,
-            borderBottom: '1px solid rgba(110,231,183,0.05)',
-          }}
-        >
-          <div>
-            <div style={{ fontSize: 16, fontWeight: 700, color: '#fff' }}>Progress photos</div>
-            <div style={{ fontSize: 11, color: '#4A6B58', marginTop: 4, lineHeight: 1.4 }}>
-              Add new check-in photos whenever you want — same angles help comparisons.
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={() => setPhotoModalOpen(true)}
-            style={{
-              padding: '6px 14px',
-              borderRadius: 100,
-              background: 'rgba(110,231,183,0.1)',
-              border: '1px solid rgba(110,231,183,0.15)',
-              color: '#6EE7B7',
-              fontSize: 11,
-              fontWeight: 700,
-              flexShrink: 0,
-            }}
-          >
-            + Add photo
-          </button>
-        </div>
-        <ProgressTimeline
-          photos={progressPhotos}
-          onAdd={() => setPhotoModalOpen(true)}
-          onSelectPhoto={() => {
-            if (progressPhotos.length >= 2) setCompareOpen(true)
-          }}
-        />
-        {progressPhotos.length >= 2 && (
-          <div style={{ padding: '0 18px 16px' }}>
-            <div style={{ fontSize: 12, color: '#2D5B3F', fontWeight: 600, marginBottom: 8 }}>Body fat trend (estimated)</div>
-            <BodyFatLineChart photos={progressPhotos} height={140} />
-          </div>
-        )}
-      </motion.div>
-
-      <PhotoUploadModal
-        isOpen={photoModalOpen}
-        onClose={() => setPhotoModalOpen(false)}
-        profile={profile}
-        onSaved={loadProgressPhotos}
-      />
-      <CompareModal
-        isOpen={compareOpen}
-        onClose={() => setCompareOpen(false)}
-        photos={progressPhotos}
-        profile={profile}
-      />
 
       <div className="dashboard-desktop-2col">
       {/* E. Today's Focus */}
