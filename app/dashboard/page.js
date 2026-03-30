@@ -48,6 +48,175 @@ function hasUsableWorkoutPlan(workoutPlanRow) {
   return false
 }
 
+const DASHBOARD_TIPS = [
+  'Protein at breakfast makes it easier to hit your daily target.',
+  'A 10-minute walk after meals helps energy and digestion.',
+  'Train close to failure on the last set — not every set.',
+  'Sleep is when muscle repairs: aim for a consistent wake time.',
+  'Front, side, and back photos monthly beat the scale alone.',
+  'If the gym is packed, swap machines for dumbbells — same muscle, less wait.',
+  'Hydrate before coffee — your training will feel easier.',
+]
+
+function workoutDayKey(loggedAt) {
+  const raw = loggedAt
+  const d = typeof raw === 'string' ? new Date(raw) : new Date(raw || Date.now())
+  if (Number.isNaN(d.getTime())) return null
+  return d.toISOString().split('T')[0]
+}
+
+/** Consecutive days with ≥1 logged workout, counting back from today or yesterday. */
+function computeWorkoutStreak(workouts) {
+  if (!workouts?.length) return 0
+  const daySet = new Set(workouts.map((w) => workoutDayKey(w.logged_at)).filter(Boolean))
+  const cur = new Date()
+  cur.setHours(12, 0, 0, 0)
+  const todayStr = cur.toISOString().split('T')[0]
+  if (!daySet.has(todayStr)) {
+    cur.setDate(cur.getDate() - 1)
+  }
+  let streak = 0
+  for (let i = 0; i < 120; i++) {
+    const key = cur.toISOString().split('T')[0]
+    if (daySet.has(key)) streak++
+    else break
+    cur.setDate(cur.getDate() - 1)
+  }
+  return streak
+}
+
+function startOfWeekMondayMs() {
+  const now = new Date()
+  const day = now.getDay()
+  const offset = day === 0 ? -6 : 1 - day
+  const monday = new Date(now.getFullYear(), now.getMonth(), now.getDate() + offset, 0, 0, 0, 0)
+  return monday.getTime()
+}
+
+function countWorkoutsThisWeek(workouts) {
+  const start = startOfWeekMondayMs()
+  return (workouts || []).filter((w) => {
+    const t = new Date(w.logged_at).getTime()
+    return !Number.isNaN(t) && t >= start
+  }).length
+}
+
+function pickDashboardTip() {
+  const day = Math.floor(Date.now() / 86400000)
+  return DASHBOARD_TIPS[day % DASHBOARD_TIPS.length]
+}
+
+function truncate(str, max) {
+  if (str == null || typeof str !== 'string') return ''
+  const t = str.trim()
+  if (t.length <= max) return t
+  return `${t.slice(0, max - 1)}…`
+}
+
+function DashboardAtAGlance({ profileRow, coachFirstName }) {
+  const now = new Date()
+  const dateLine = now.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })
+  const goalLine =
+    profileRow?.goal && String(profileRow.goal).trim().length > 0
+      ? truncate(profileRow.goal, 140)
+      : 'Set your goal in Settings so your coach can stay aligned with you.'
+  const tip = pickDashboardTip()
+  return (
+    <div
+      className="glass"
+      style={{
+        padding: 16,
+        marginBottom: 14,
+        border: '1px solid rgba(110,231,183,0.12)',
+        background: 'linear-gradient(145deg, rgba(16,185,129,0.08), rgba(14,20,14,0.85))',
+      }}
+    >
+      <div style={{ fontSize: 11, color: '#6EE7B7', fontWeight: 700, letterSpacing: 0.4, marginBottom: 6 }}>
+        {dateLine}
+      </div>
+      <div style={{ fontSize: 15, fontWeight: 800, color: '#fff', marginBottom: 8 }}>
+        You&apos;re in the right place{coachFirstName ? ` — ${coachFirstName} has your back` : ''}.
+      </div>
+      <div style={{ fontSize: 12, color: '#B8D4C4', lineHeight: 1.5, marginBottom: 12 }}>
+        <span style={{ color: '#2D5B3F', fontWeight: 600 }}>Goal · </span>
+        {goalLine}
+      </div>
+      <div
+        style={{
+          padding: '12px 14px',
+          borderRadius: 12,
+          background: 'rgba(8,12,8,0.55)',
+          border: '1px solid rgba(110,231,183,0.08)',
+        }}
+      >
+        <div style={{ fontSize: 10, color: '#2D5B3F', fontWeight: 700, marginBottom: 4 }}>TIP OF THE DAY</div>
+        <div style={{ fontSize: 13, color: '#D1FAE5', lineHeight: 1.45 }}>{tip}</div>
+      </div>
+    </div>
+  )
+}
+
+function shortcutPillStyle(active) {
+  return {
+    flex: '0 0 auto',
+    padding: '10px 14px',
+    borderRadius: 999,
+    border: active ? '1px solid rgba(110,231,183,0.35)' : '1px solid rgba(110,231,183,0.12)',
+    background: active ? 'rgba(16,185,129,0.18)' : 'rgba(14,20,14,0.6)',
+    color: active ? '#6EE7B7' : '#A7C4B8',
+    fontSize: 12,
+    fontWeight: 600,
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    gap: 6,
+    whiteSpace: 'nowrap',
+  }
+}
+
+function DashboardShortcutStrip({
+  router,
+  chatLabel,
+  onOpenFood,
+  onOpenWorkout,
+  onOpenPhoto,
+}) {
+  const items = [
+    { icon: '📋', label: 'Plans', onClick: () => router.push('/plans') },
+    { icon: '💬', label: `Chat`, sub: chatLabel, onClick: () => router.push('/chat') },
+    { icon: '🥗', label: 'Log meal', onClick: onOpenFood },
+    { icon: '🏋️', label: 'Log workout', onClick: onOpenWorkout },
+    { icon: '📷', label: 'Photo', onClick: onOpenPhoto },
+    { icon: '⚙️', label: 'Settings', onClick: () => router.push('/settings') },
+  ]
+  return (
+    <div style={{ marginBottom: 16 }}>
+      <div style={{ fontSize: 11, color: '#2D5B3F', fontWeight: 700, marginBottom: 8 }}>QUICK ACTIONS</div>
+      <div
+        style={{
+          display: 'flex',
+          gap: 8,
+          overflowX: 'auto',
+          paddingBottom: 6,
+          marginBottom: 2,
+          WebkitOverflowScrolling: 'touch',
+          scrollbarWidth: 'none',
+        }}
+      >
+        {items.map((item) => (
+          <button key={item.label} type="button" onClick={item.onClick} style={shortcutPillStyle(false)}>
+            <span>{item.icon}</span>
+            <span>
+              {item.label}
+              {item.sub ? <span style={{ opacity: 0.85 }}> · {item.sub}</span> : null}
+            </span>
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 export default function Dashboard() {
   const router = useRouter()
   const { user, profile: authProfile, loading: authLoading, profileLoading, refreshProfile } = useAuth()
@@ -463,6 +632,18 @@ export default function Dashboard() {
           </div>
         </motion.div>
 
+        <DashboardAtAGlance
+          profileRow={profile}
+          coachFirstName={(skTrainer.name || '').split(/\s+/)[0] || ''}
+        />
+        <DashboardShortcutStrip
+          router={router}
+          chatLabel={(skTrainer.name || 'Coach').split(/\s+/).pop()}
+          onOpenFood={() => setFoodLogModalOpen(true)}
+          onOpenWorkout={() => setWorkoutLogModalOpen(true)}
+          onOpenPhoto={() => setPhotoModalOpen(true)}
+        />
+
         <div className="card-grid" style={{ marginBottom: 14 }}>
           {[1, 2, 3].map((i) => (
             <div key={i} className="glass" style={{ padding: 18, borderTop: '3px solid rgba(110,231,183,0.15)' }}>
@@ -470,6 +651,13 @@ export default function Dashboard() {
               <div style={{ ...skeletonPulse, height: 22, width: '55%' }} />
             </div>
           ))}
+        </div>
+
+        <div className="glass" style={{ padding: 14, marginBottom: 14 }}>
+          <div style={{ fontSize: 11, color: '#2D5B3F', fontWeight: 700, marginBottom: 6 }}>LOADING</div>
+          <div style={{ fontSize: 13, color: '#8BAFA0', lineHeight: 1.45 }}>
+            Pulling your latest plan and weight history… Progress photos and shortcuts above stay available.
+          </div>
         </div>
 
         <div className="glass" style={{ padding: 0, marginBottom: 14, overflow: 'hidden' }}>
@@ -547,6 +735,18 @@ export default function Dashboard() {
           currentTrainer={skTrainer}
           onSelect={handleSelectTrainer}
         />
+        <FoodLogModal
+          open={foodLogModalOpen}
+          onClose={() => setFoodLogModalOpen(false)}
+          profileId={profile?.id}
+          onLog={handleMealLogged}
+        />
+        <LogWorkoutModal
+          open={workoutLogModalOpen}
+          onClose={() => setWorkoutLogModalOpen(false)}
+          profileId={profile?.id}
+          onLog={handleWorkoutLogged}
+        />
       </div>
     )
   }
@@ -587,6 +787,46 @@ export default function Dashboard() {
           >
             📷
           </button>
+        </div>
+
+        <DashboardAtAGlance
+          profileRow={profile}
+          coachFirstName={(trainer.name || '').split(/\s+/)[0] || ''}
+        />
+        <DashboardShortcutStrip
+          router={router}
+          chatLabel={(trainer.name || 'Coach').split(/\s+/).pop()}
+          onOpenFood={() => setFoodLogModalOpen(true)}
+          onOpenWorkout={() => setWorkoutLogModalOpen(true)}
+          onOpenPhoto={() => setPhotoModalOpen(true)}
+        />
+
+        <div className="card-grid" style={{ marginBottom: 20 }}>
+          <div className="glass" style={{ padding: 16, borderTop: '3px solid #F97316' }}>
+            <div style={{ fontSize: 10, color: '#2D5B3F', fontWeight: 600 }}>THIS WEEK · SESSIONS</div>
+            <div style={{ fontSize: 22, fontWeight: 800, color: '#fff', marginTop: 4 }}>
+              {countWorkoutsThisWeek(recentWorkouts)}
+            </div>
+            <div style={{ fontSize: 11, color: '#4A6B58', marginTop: 6, lineHeight: 1.4 }}>
+              Log workouts to see this climb. Full program unlocks smarter tracking.
+            </div>
+          </div>
+          <div className="glass" style={{ padding: 16, borderTop: '3px solid #6EE7B7' }}>
+            <div style={{ fontSize: 10, color: '#2D5B3F', fontWeight: 600 }}>PHOTOS</div>
+            <div style={{ fontSize: 22, fontWeight: 800, color: '#fff', marginTop: 4 }}>{progressPhotos.length}</div>
+            <div style={{ fontSize: 11, color: '#4A6B58', marginTop: 6, lineHeight: 1.4 }}>
+              Progress pics help your coach see what the scale won&apos;t show.
+            </div>
+          </div>
+          <div className="glass" style={{ padding: 16, borderTop: '3px solid #93C5FD' }}>
+            <div style={{ fontSize: 10, color: '#2D5B3F', fontWeight: 600 }}>WEIGHT</div>
+            <div style={{ fontSize: 22, fontWeight: 800, color: '#fff', marginTop: 4 }}>
+              {profile?.weight_kg != null ? `${profile.weight_kg} kg` : '—'}
+            </div>
+            <div style={{ fontSize: 11, color: '#4A6B58', marginTop: 6, lineHeight: 1.4 }}>
+              Log weight on the full dashboard once your plan is live.
+            </div>
+          </div>
         </div>
 
         <div
@@ -708,9 +948,12 @@ export default function Dashboard() {
 
         <div className="card-grid">
           {[
-            { emoji: '🏋️', title: 'Personalized Workouts', desc: 'Tailored to your goals, experience, and equipment' },
-            { emoji: '🥗', title: 'Smart Nutrition', desc: 'Meal plans designed for your preferences and dietary needs' },
-            { emoji: '💬', title: 'AI Coaching', desc: 'Chat with your trainer anytime for advice and motivation' },
+            { emoji: '🏋️', title: 'Personalized workouts', desc: 'Programs matched to your equipment, schedule, and coach personality.' },
+            { emoji: '🥗', title: 'Nutrition that fits', desc: 'Meal plans and logging so calories and protein aren’t a guessing game.' },
+            { emoji: '💬', title: 'Coach in your pocket', desc: 'Ask about form, soreness, or motivation — your AI trainer remembers your plan.' },
+            { emoji: '📷', title: 'Visual progress', desc: 'Photo check-ins and comparisons so you see changes the scale hides.' },
+            { emoji: '📊', title: 'Habits that stick', desc: 'Weight, workouts, and meals in one place — build streaks without spreadsheets.' },
+            { emoji: '⚡', title: 'Fast course correction', desc: 'Tell the coach what changed (injury, travel, diet) and regenerate your plan.' },
           ].map((card, i) => (
             <div key={i} className="glass" style={{ padding: '20px 18px', background: 'rgba(14, 20, 14, 0.92)', WebkitBackfaceVisibility: 'visible' }}>
               <div style={{ fontSize: 28, marginBottom: 8 }}>{card.emoji}</div>
@@ -719,6 +962,19 @@ export default function Dashboard() {
             </div>
           ))}
         </div>
+
+        <FoodLogModal
+          open={foodLogModalOpen}
+          onClose={() => setFoodLogModalOpen(false)}
+          profileId={profile?.id}
+          onLog={handleMealLogged}
+        />
+        <LogWorkoutModal
+          open={workoutLogModalOpen}
+          onClose={() => setWorkoutLogModalOpen(false)}
+          profileId={profile?.id}
+          onLog={handleWorkoutLogged}
+        />
       </div>
     )
   }
@@ -732,6 +988,10 @@ export default function Dashboard() {
   const cwN = typeof currentWeight === 'number' && !Number.isNaN(currentWeight) ? currentWeight : null
   const weightDiff = (cwN ?? 0) - (swN ?? 0)
   const progressDir = profile.goal === 'lose_fat' ? (weightDiff < 0 ? 'good' : 'bad') : profile.goal === 'build_muscle' ? (weightDiff > 0 ? 'good' : 'bad') : 'neutral'
+
+  const workoutStreak = computeWorkoutStreak(recentWorkouts)
+  const workoutsThisWeek = countWorkoutsThisWeek(recentWorkouts)
+  const weekTargetSessions = Math.min(7, Math.max(1, Number(plans.workout?.content?.daysPerWeek) || 4))
 
   const cardDelays = [0, 100, 200, 300, 400, 500, 600, 700]
 
@@ -839,6 +1099,48 @@ export default function Dashboard() {
         </div>
       </motion.div>
 
+      <DashboardAtAGlance
+        profileRow={profile}
+        coachFirstName={(trainer.name || '').split(/\s+/)[0] || ''}
+      />
+      <DashboardShortcutStrip
+        router={router}
+        chatLabel={(trainer.name || 'Coach').split(/\s+/).pop()}
+        onOpenFood={() => setFoodLogModalOpen(true)}
+        onOpenWorkout={() => setWorkoutLogModalOpen(true)}
+        onOpenPhoto={() => setPhotoModalOpen(true)}
+      />
+
+      <div
+        className="glass"
+        style={{
+          padding: '14px 16px',
+          marginBottom: 14,
+          display: 'flex',
+          justifyContent: 'space-between',
+          flexWrap: 'wrap',
+          gap: 12,
+          border: '1px solid rgba(110,231,183,0.08)',
+        }}
+      >
+        <div>
+          <div style={{ fontSize: 9, color: '#2D5B3F', fontWeight: 700, letterSpacing: 0.5 }}>TODAY · MEALS</div>
+          <div style={{ fontSize: 15, fontWeight: 800, color: '#fff', marginTop: 2 }}>
+            {todayMeals.length} logged
+          </div>
+        </div>
+        <div>
+          <div style={{ fontSize: 9, color: '#2D5B3F', fontWeight: 700, letterSpacing: 0.5 }}>PROGRESS PHOTOS</div>
+          <div style={{ fontSize: 15, fontWeight: 800, color: '#fff', marginTop: 2 }}>{progressPhotos.length}</div>
+        </div>
+        <div>
+          <div style={{ fontSize: 9, color: '#2D5B3F', fontWeight: 700, letterSpacing: 0.5 }}>WEIGHT</div>
+          <div style={{ fontSize: 15, fontWeight: 800, color: '#fff', marginTop: 2 }}>
+            {profile?.weight_kg != null ? `${profile.weight_kg} kg` : '—'}
+          </div>
+        </div>
+      </div>
+
       {!hasWorkoutPlan && (
         <div
           className="glass"
@@ -889,13 +1191,21 @@ export default function Dashboard() {
       >
         <div className="glass" style={{ padding: 18, borderTop: '3px solid #F97316' }}>
           <div style={{ fontSize: 10, color: '#2D5B3F', fontWeight: 600 }}>🔥 STREAK</div>
-          <div style={{ fontSize: 20, fontWeight: 800, color: '#fff' }}>Day 1</div>
-          {!hasWorkoutPlan && <div style={{ fontSize: 9, color: '#4A6B58', marginTop: 2 }}>default</div>}
+          <div style={{ fontSize: 20, fontWeight: 800, color: '#fff' }}>
+            {workoutStreak > 0 ? `${workoutStreak} day${workoutStreak === 1 ? '' : 's'}` : '—'}
+          </div>
+          <div style={{ fontSize: 10, color: '#4A6B58', marginTop: 6, lineHeight: 1.35 }}>
+            {workoutStreak > 0 ? 'Consecutive days with a logged workout.' : 'Log a workout to start a streak.'}
+          </div>
         </div>
         <div className="glass" style={{ padding: 18, borderTop: '3px solid #6EE7B7' }}>
           <div style={{ fontSize: 10, color: '#2D5B3F', fontWeight: 600 }}>⚡ THIS WEEK</div>
-          <div style={{ fontSize: 20, fontWeight: 800, color: '#fff' }}>0/4</div>
-          {!hasWorkoutPlan && <div style={{ fontSize: 9, color: '#4A6B58', marginTop: 2 }}>placeholder</div>}
+          <div style={{ fontSize: 20, fontWeight: 800, color: '#fff' }}>
+            {workoutsThisWeek}/{weekTargetSessions}
+          </div>
+          <div style={{ fontSize: 10, color: '#4A6B58', marginTop: 6, lineHeight: 1.35 }}>
+            Sessions logged since Monday · target from your plan ({weekTargetSessions}/wk).
+          </div>
         </div>
         <div className="glass" style={{ padding: 18, borderTop: '3px solid #93C5FD' }}>
           <div style={{ fontSize: 10, color: '#2D5B3F', fontWeight: 600 }}>📊 PROGRESS</div>
@@ -1487,20 +1797,22 @@ export default function Dashboard() {
         )}
       </motion.div>
 
-      {/* J. Quick Actions */}
+      {/* J. More shortcuts (large tap targets) */}
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: cardDelays[7] }}
-        style={{ display: 'flex', gap: 10, marginBottom: 24, flexWrap: 'wrap' }}
+        style={{ marginBottom: 8 }}
       >
+        <div style={{ fontSize: 11, color: '#2D5B3F', fontWeight: 700, marginBottom: 10 }}>MORE</div>
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
         <button
           onClick={() => router.push('/chat')}
           className="glass-sm"
           style={{ flex: 1, minWidth: 100, padding: 14, textAlign: 'center', border: '1px solid rgba(110,231,183,0.1)' }}
         >
           <div style={{ fontSize: 20, marginBottom: 4 }}>💬</div>
-          <div style={{ fontSize: 11, fontWeight: 600, color: '#6EE7B7' }}>Ask {trainer.name.split(' ').pop()}</div>
+          <div style={{ fontSize: 11, fontWeight: 600, color: '#6EE7B7' }}>Ask {(trainer.name || 'Coach').split(/\s+/).pop()}</div>
         </button>
         <button
           onClick={() => setFoodLogModalOpen(true)}
@@ -1534,6 +1846,10 @@ export default function Dashboard() {
           <div style={{ fontSize: 20, marginBottom: 4 }}>⚖️</div>
           <div style={{ fontSize: 11, fontWeight: 600, color: '#6EE7B7' }}>Log Weight</div>
         </button>
+        </div>
+        <div style={{ fontSize: 11, color: '#4A6B58', marginTop: 12, marginBottom: 24, lineHeight: 1.45 }}>
+          Plans &amp; photos are up top too — scroll less, tap more.
+        </div>
       </motion.div>
 
       <WeightModal
