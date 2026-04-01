@@ -34,3 +34,11 @@ You can check out [the Next.js GitHub repository](https://github.com/vercel/next
 The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+
+### Supabase environment variables (production)
+
+Add the same variables you use locally (`NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`).
+
+In **Vercel → Project → Settings → Environment Variables**, also set **`SUPABASE_SERVICE_ROLE_KEY`** (from Supabase Dashboard → Project Settings → API → `service_role` secret). Apply it to **Production** and **Preview** if you test deployments there. Server-only API routes (for example `app/api/progress-photo`) use this key when present so trusted server-side inserts are not blocked by Row Level Security. Redeploy after adding or changing this variable.
+
+See [`.env.example`](.env.example) for a template. For SQL checks on policies and `profiles.user_id`, run [`supabase-verify-progress-photos.sql`](supabase-verify-progress-photos.sql) in the Supabase SQL Editor after applying [`supabase-progress-photos-migration.sql`](supabase-progress-photos-migration.sql).

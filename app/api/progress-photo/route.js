@@ -81,9 +81,30 @@ export async function POST(request) {
       return Response.json({ error: 'Not authenticated' }, { status: 401 })
     }
 
+    const { data: ownedProfile, error: profileLookupErr } = await supabase
+      .from('profiles')
+      .select('id')
+      .eq('user_id', user.id)
+      .maybeSingle()
+
+    if (profileLookupErr) {
+      console.error('progress-photo profile lookup:', profileLookupErr)
+      return Response.json({ error: 'Could not verify profile' }, { status: 500 })
+    }
+    if (!ownedProfile?.id) {
+      return Response.json(
+        { error: 'Profile not linked to this account. Complete onboarding or contact support.' },
+        { status: 403 }
+      )
+    }
+    if (profileId !== ownedProfile.id) {
+      return Response.json({ error: 'Profile does not match this account.' }, { status: 403 })
+    }
+
+    const effectiveProfileId = ownedProfile.id
     const uid = user.id
     const fileName = `${Date.now()}.jpg`
-    const storagePath = `${uid}/${profileId}/${fileName}`
+    const storagePath = `${uid}/${effectiveProfileId}/${fileName}`
 
     const buffer = Buffer.from(imageBase64, 'base64')
     const { error: uploadError } = await supabase.storage
@@ -104,7 +125,7 @@ export async function POST(request) {
     const { data: inserted, error: insertError } = await supabase
       .from('progress_photos')
       .insert({
-        profile_id: profileId,
+        profile_id: effectiveProfileId,
         storage_path: storagePath,
         image_url: null,
         analysis,
