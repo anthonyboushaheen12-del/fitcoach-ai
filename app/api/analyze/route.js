@@ -13,6 +13,22 @@ const anthropic = new Anthropic({
 })
 
 export async function POST(request) {
+  // #region agent log
+  const _dbg = (loc, msg, data, hypothesisId) =>
+    fetch('http://127.0.0.1:7838/ingest/7cadc763-027f-402a-b4fb-5d3dcb45df0f', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'ca100b' },
+      body: JSON.stringify({
+        sessionId: 'ca100b',
+        runId: 'pre-fix',
+        hypothesisId,
+        location: loc,
+        message: msg,
+        data,
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {})
+  // #endregion
   try {
     const body = await request.json()
     const { profileId } = body
@@ -38,6 +54,20 @@ export async function POST(request) {
         .order('logged_at', { ascending: false })
         .limit(14),
     ])
+
+    // #region agent log
+    await _dbg(
+      'analyze/route.js:supabase',
+      'profile/meals/workouts fetch',
+      {
+        profileErr: profileRes.error?.message?.slice?.(0, 120) || null,
+        hasProfile: !!profileRes.data,
+        mealsErr: mealsRes.error?.message?.slice?.(0, 80) || null,
+        workoutsErr: workoutsRes.error?.message?.slice?.(0, 80) || null,
+      },
+      'H6'
+    )
+    // #endregion
 
     const profile = profileRes.data
     if (!profile) {
@@ -77,6 +107,10 @@ Workouts: ${workoutsSummary}
 Body images: ${bodyImagesNote}
 `.trim()
 
+    // #region agent log
+    await _dbg('analyze/route.js:pre-anthropic', 'calling anthropic', { hasKey: !!process.env.ANTHROPIC_API_KEY }, 'H6')
+    // #endregion
+
     const response = await anthropic.messages.create({
       model: 'claude-sonnet-4-20250514',
       max_tokens: 1024,
@@ -91,6 +125,21 @@ Body images: ${bodyImagesNote}
 
     return Response.json({ summary: text, recommendation: text })
   } catch (err) {
+    // #region agent log
+    fetch('http://127.0.0.1:7838/ingest/7cadc763-027f-402a-b4fb-5d3dcb45df0f', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'ca100b' },
+      body: JSON.stringify({
+        sessionId: 'ca100b',
+        runId: 'pre-fix',
+        hypothesisId: 'H6',
+        location: 'analyze/route.js:catch',
+        message: 'exception',
+        data: { msg: err?.message?.slice?.(0, 200) },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {})
+    // #endregion
     console.error('Analyze API error:', err)
     return Response.json(
       { error: err?.message || 'Analysis failed' },

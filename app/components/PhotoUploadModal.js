@@ -40,7 +40,6 @@ export default function PhotoUploadModal({ isOpen, onClose, profile, onSaved }) 
     setError('')
     setBatchHint('')
     setBusy(true)
-    const headers = await jsonHeadersWithAuth()
     const wVal = weight !== '' ? Number(weight) : profile.weight_kg
     const notesVal = notes?.trim() || null
     let saved = 0
@@ -62,7 +61,7 @@ export default function PhotoUploadModal({ isOpen, onClose, profile, onSaved }) 
 
           const pr = await fetch('/api/progress-photo', {
             method: 'POST',
-            headers,
+            headers: await jsonHeadersWithAuth(),
             body: JSON.stringify({
               profileId: profile.id,
               imageBase64: base64,

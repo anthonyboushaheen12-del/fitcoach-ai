@@ -31,6 +31,9 @@ BEGIN
     RAISE EXCEPTION 'forbidden';
   END IF;
 
+  -- Bypass RLS for this statement (ownership checks above). Needed if table has FORCE ROW LEVEL SECURITY.
+  PERFORM set_config('row_security', 'off', true);
+
   INSERT INTO public.progress_photos (
     profile_id,
     storage_path,
