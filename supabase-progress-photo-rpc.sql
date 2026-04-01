@@ -56,6 +56,11 @@ BEGIN
 END;
 $$;
 
+-- Ensures the INSERT inside this SECURITY DEFINER function bypasses RLS (owner runs as postgres).
+ALTER FUNCTION public.insert_owned_progress_photo(
+  uuid, text, text, jsonb, text, numeric, text, text
+) OWNER TO postgres;
+
 REVOKE ALL ON FUNCTION public.insert_owned_progress_photo(
   uuid, text, text, jsonb, text, numeric, text, text
 ) FROM PUBLIC;

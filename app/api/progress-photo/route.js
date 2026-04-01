@@ -8,6 +8,52 @@ import {
 const BUCKET = 'progress-photos'
 const SIGNED_URL_SEC = 3600
 
+function isRlsPolicyError(err) {
+  const m = (err?.message || '').toLowerCase()
+  return m.includes('row-level security') || m.includes('rls')
+}
+
+async function insertProgressPhotoRow(userSb, serviceSb, row) {
+  if (serviceSb) {
+    const ins = await serviceSb.from('progress_photos').insert(row).select().single()
+    if (!ins.error) {
+      return { data: ins.data, error: null }
+    }
+    // Invalid/pasted anon key as "service role" still enforces RLS — fall back to RPC.
+    if (isRlsPolicyError(ins.error)) {
+      console.warn('progress-photo: service-role insert hit RLS, falling back to RPC')
+      const rpc = await userSb
+        .rpc('insert_owned_progress_photo', {
+          p_profile_id: row.profile_id,
+          p_storage_path: row.storage_path,
+          p_image_url: row.image_url,
+          p_analysis: row.analysis,
+          p_body_fat_estimate: row.body_fat_estimate,
+          p_weight_at_time: row.weight_at_time,
+          p_notes: row.notes,
+          p_photo_type: row.photo_type,
+        })
+        .single()
+      return { data: rpc.data, error: rpc.error }
+    }
+    return { data: ins.data, error: ins.error }
+  }
+
+  const rpc = await userSb
+    .rpc('insert_owned_progress_photo', {
+      p_profile_id: row.profile_id,
+      p_storage_path: row.storage_path,
+      p_image_url: row.image_url,
+      p_analysis: row.analysis,
+      p_body_fat_estimate: row.body_fat_estimate,
+      p_weight_at_time: row.weight_at_time,
+      p_notes: row.notes,
+      p_photo_type: row.photo_type,
+    })
+    .single()
+  return { data: rpc.data, error: rpc.error }
+}
+
 export async function GET(request) {
   let supabase
   try {
@@ -143,33 +189,11 @@ export async function POST(request) {
       photo_type: photoType || 'front',
     }
 
-    let inserted
-    let insertError
-
-    if (serviceSb) {
-      const ins = await serviceSb
-        .from('progress_photos')
-        .insert(row)
-        .select()
-        .single()
-      inserted = ins.data
-      insertError = ins.error
-    } else {
-      const ins = await userSb
-        .rpc('insert_owned_progress_photo', {
-          p_profile_id: row.profile_id,
-          p_storage_path: row.storage_path,
-          p_image_url: row.image_url,
-          p_analysis: row.analysis,
-          p_body_fat_estimate: row.body_fat_estimate,
-          p_weight_at_time: row.weight_at_time,
-          p_notes: row.notes,
-          p_photo_type: row.photo_type,
-        })
-        .single()
-      inserted = ins.data
-      insertError = ins.error
-    }
+    const { data: inserted, error: insertError } = await insertProgressPhotoRow(
+      userSb,
+      serviceSb,
+      row
+    )
 
     if (insertError) {
       await storageClient.storage.from(BUCKET).remove([storagePath])
@@ -179,8 +203,10 @@ export async function POST(request) {
         lower.includes('insert_owned_progress_photo') ||
         lower.includes('does not exist') ||
         lower.includes('42883')
-          ? 'Database function missing: run supabase-progress-photo-rpc.sql in Supabase SQL Editor, or set SUPABASE_SERVICE_ROLE_KEY on the server.'
-          : msg
+          ? 'Database function missing: run supabase-progress-photo-rpc.sql in Supabase SQL Editor (include ALTER FUNCTION ... OWNER TO postgres), or set the real service_role key in Vercel.'
+          : isRlsPolicyError(insertError)
+            ? `${msg} Fix: run supabase-progress-photo-rpc.sql in Supabase (ALTER FUNCTION ... OWNER TO postgres), or set SUPABASE_SERVICE_ROLE_KEY to the service_role secret (not the anon key).`
+            : msg
       console.error('progress-photo insert:', insertError)
       return Response.json({ error: hint }, { status: 500 })
     }

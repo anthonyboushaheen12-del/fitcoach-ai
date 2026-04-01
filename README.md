@@ -39,8 +39,8 @@ Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/bui
 
 Add the same variables you use locally (`NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`).
 
-In **Vercel → Project → Settings → Environment Variables**, also set **`SUPABASE_SERVICE_ROLE_KEY`** (from Supabase Dashboard → Project Settings → API → `service_role` secret). Apply it to **Production** and **Preview** if you test deployments there. Server-only API routes (for example `app/api/progress-photo`) use this key when present so trusted server-side inserts are not blocked by Row Level Security. Redeploy after adding or changing this variable.
+In **Vercel → Project → Settings → Environment Variables**, also set **`SUPABASE_SERVICE_ROLE_KEY`** to the **`service_role`** secret from Supabase (Project Settings → API). Do **not** paste the `anon` key here — if you do, inserts still hit RLS and you will see “row-level security policy” errors. Apply to **Production** and **Preview** if you test deployments there, then redeploy.
 
 See [`.env.example`](.env.example) for a template. For SQL checks on policies and `profiles.user_id`, run [`supabase-verify-progress-photos.sql`](supabase-verify-progress-photos.sql) in the Supabase SQL Editor after applying [`supabase-progress-photos-migration.sql`](supabase-progress-photos-migration.sql).
 
-If saving progress photos still returns a row-level security error **without** `SUPABASE_SERVICE_ROLE_KEY`, run [`supabase-progress-photo-rpc.sql`](supabase-progress-photo-rpc.sql) in the SQL Editor so inserts use a secure `SECURITY DEFINER` RPC that checks `profiles.user_id` before writing.
+If saving progress photos still returns a row-level security error, run the **full** [`supabase-progress-photo-rpc.sql`](supabase-progress-photo-rpc.sql) in the SQL Editor (including `ALTER FUNCTION … OWNER TO postgres`). That RPC path is also used automatically when the server “service role” insert hits RLS (e.g. wrong key).
