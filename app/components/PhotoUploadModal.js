@@ -20,56 +20,87 @@ export default function PhotoUploadModal({ isOpen, onClose, profile, onSaved }) 
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [justSaved, setJustSaved] = useState(false)
+  const [batchHint, setBatchHint] = useState('')
   const inputRef = useRef(null)
 
   useEffect(() => {
     if (!isOpen || !profile) return
     setJustSaved(false)
     setError('')
+    setBatchHint('')
     setWeight(profile.weight_kg ?? '')
   }, [isOpen, profile?.id, profile?.weight_kg])
 
   if (!isOpen || !profile?.id) return null
 
   async function handleFile(e) {
-    const file = e.target.files?.[0]
-    if (!file) return
+    const files = Array.from(e.target.files || []).filter(Boolean)
+    if (!files.length) return
     e.target.value = ''
     setError('')
+    setBatchHint('')
     setBusy(true)
+    const headers = await jsonHeadersWithAuth()
+    const wVal = weight !== '' ? Number(weight) : profile.weight_kg
+    const notesVal = notes?.trim() || null
+    let saved = 0
+    const failures = []
     try {
-      const { base64 } = await compressImageForUpload(file)
-      const ar = await fetch('/api/analyze-body', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image: base64, mediaType: 'image/jpeg', profile }),
-      })
-      const analysisPayload = await ar.json().catch(() => ({}))
-      const analysis = analysisPayload.analysis || analysisPayload
+      for (let i = 0; i < files.length; i++) {
+        if (files.length > 1) {
+          setBatchHint(`Photo ${i + 1} of ${files.length}…`)
+        }
+        try {
+          const { base64 } = await compressImageForUpload(files[i])
+          const ar = await fetch('/api/analyze-body', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ image: base64, mediaType: 'image/jpeg', profile }),
+          })
+          const analysisPayload = await ar.json().catch(() => ({}))
+          const analysis = analysisPayload.analysis || analysisPayload
 
-      const pr = await fetch('/api/progress-photo', {
-        method: 'POST',
-        headers: await jsonHeadersWithAuth(),
-        body: JSON.stringify({
-          profileId: profile.id,
-          imageBase64: base64,
-          analysis,
-          weightAtTime: weight !== '' ? Number(weight) : profile.weight_kg,
-          notes: notes?.trim() || null,
-          photoType,
-        }),
-      })
-      if (!pr.ok) {
-        const err = await pr.json().catch(() => ({}))
-        throw new Error(err.error || 'Save failed')
+          const pr = await fetch('/api/progress-photo', {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({
+              profileId: profile.id,
+              imageBase64: base64,
+              analysis,
+              weightAtTime: wVal,
+              notes: notesVal,
+              photoType,
+            }),
+          })
+          if (!pr.ok) {
+            const err = await pr.json().catch(() => ({}))
+            throw new Error(err.error || 'Save failed')
+          }
+          saved++
+        } catch (oneErr) {
+          failures.push(`#${i + 1}: ${oneErr?.message || 'failed'}`)
+        }
       }
-      setNotes('')
-      onSaved?.()
-      setJustSaved(true)
+
+      if (saved > 0) {
+        setNotes('')
+        onSaved?.()
+      }
+      if (failures.length) {
+        const suffix =
+          saved > 0
+            ? ` Saved ${saved}, failed: ${failures.join(' · ')}`
+            : ` ${failures.join(' · ')}`
+        setError(saved > 0 ? `${failures.length} photo(s) could not save.${suffix}` : failures.join(' · '))
+        if (saved > 0) setJustSaved(true)
+      } else {
+        setJustSaved(true)
+      }
     } catch (err) {
       setError(err?.message || 'Something went wrong')
     } finally {
       setBusy(false)
+      setBatchHint('')
     }
   }
 
@@ -173,7 +204,17 @@ export default function PhotoUploadModal({ isOpen, onClose, profile, onSaved }) 
             resize: 'vertical',
           }}
         />
-        <input ref={inputRef} type="file" accept="image/jpeg,image/png,image/webp" style={{ display: 'none' }} onChange={handleFile} />
+        <div style={{ fontSize: 12, color: '#5BA37A', marginBottom: 10, lineHeight: 1.4 }}>
+          Select one or more photos (same angle type applies to all in this batch).
+        </div>
+        <input
+          ref={inputRef}
+          type="file"
+          accept="image/jpeg,image/png,image/webp"
+          multiple
+          style={{ display: 'none' }}
+          onChange={handleFile}
+        />
         {error && <div style={{ color: '#FB7185', fontSize: 13, marginBottom: 10 }}>{error}</div>}
         {justSaved ? (
           <div>
@@ -242,7 +283,7 @@ export default function PhotoUploadModal({ isOpen, onClose, profile, onSaved }) 
               fontWeight: 700,
             }}
           >
-            {busy ? 'Analyzing & saving…' : 'Choose photo — analyze & save'}
+            {busy ? batchHint || 'Analyzing & saving…' : 'Choose photo(s) — analyze & save'}
           </button>
         )}
       </div>

@@ -42,3 +42,5 @@ Add the same variables you use locally (`NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC
 In **Vercel → Project → Settings → Environment Variables**, also set **`SUPABASE_SERVICE_ROLE_KEY`** (from Supabase Dashboard → Project Settings → API → `service_role` secret). Apply it to **Production** and **Preview** if you test deployments there. Server-only API routes (for example `app/api/progress-photo`) use this key when present so trusted server-side inserts are not blocked by Row Level Security. Redeploy after adding or changing this variable.
 
 See [`.env.example`](.env.example) for a template. For SQL checks on policies and `profiles.user_id`, run [`supabase-verify-progress-photos.sql`](supabase-verify-progress-photos.sql) in the Supabase SQL Editor after applying [`supabase-progress-photos-migration.sql`](supabase-progress-photos-migration.sql).
+
+If saving progress photos still returns a row-level security error **without** `SUPABASE_SERVICE_ROLE_KEY`, run [`supabase-progress-photo-rpc.sql`](supabase-progress-photo-rpc.sql) in the SQL Editor so inserts use a secure `SECURITY DEFINER` RPC that checks `profiles.user_id` before writing.

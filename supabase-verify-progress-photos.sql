@@ -17,3 +17,9 @@ LIMIT 50;
 SELECT relname, relrowsecurity
 FROM pg_class
 WHERE relname = 'progress_photos';
+
+-- 4) RLS bypass RPC for anon+JWT inserts (optional; see supabase-progress-photo-rpc.sql)
+SELECT proname, pg_get_function_identity_arguments(p.oid) AS args
+FROM pg_proc p
+JOIN pg_namespace n ON n.oid = p.pronamespace
+WHERE n.nspname = 'public' AND proname = 'insert_owned_progress_photo';
