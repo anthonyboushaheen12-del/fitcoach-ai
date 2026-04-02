@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { motion } from 'framer-motion'
 import { supabase } from '../../lib/supabase'
@@ -19,6 +19,7 @@ import BodyImageSlot from '../components/BodyImageSlot'
 import ProgressTimeline from '../components/ProgressTimeline'
 import PhotoUploadModal from '../components/PhotoUploadModal'
 import CompareModal from '../components/CompareModal'
+import ProgressPhotoDetailModal from '../components/ProgressPhotoDetailModal'
 import { BodyFatLineChart } from '../components/ProgressCharts'
 
 async function jsonHeadersWithAuth() {
@@ -222,7 +223,6 @@ export default function Dashboard() {
   const { user, profile: authProfile, loading: authLoading, profileLoading, refreshProfile } = useAuth()
   const profileResolutionTimedOut = useProfileResolutionTimeout(user, authProfile, 3000)
   const [plans, setPlans] = useState({ workout: null, meal: null })
-  const plansRef = useRef(plans)
   const [weightLogs, setWeightLogs] = useState([])
   const [loading, setLoading] = useState(true)
   const [weightModalOpen, setWeightModalOpen] = useState(false)
@@ -237,6 +237,7 @@ export default function Dashboard() {
   const [chartHeight, setChartHeight] = useState(160)
   const [progressPhotos, setProgressPhotos] = useState([])
   const [photoModalOpen, setPhotoModalOpen] = useState(false)
+  const [photoDetail, setPhotoDetail] = useState(null)
   const [compareOpen, setCompareOpen] = useState(false)
   const [programAdjustText, setProgramAdjustText] = useState('')
   const [adjustScope, setAdjustScope] = useState('both')
@@ -245,10 +246,6 @@ export default function Dashboard() {
 
   const profile = authProfile
   const trainer = profile ? getTrainer(profile.trainer) : getTrainer('bro')
-
-  useEffect(() => {
-    plansRef.current = plans
-  }, [plans])
 
   useEffect(() => {
     if (!user) {
@@ -300,6 +297,49 @@ export default function Dashboard() {
       setProgressPhotos(d.photos || [])
     } catch {
       setProgressPhotos([])
+    }
+  }
+
+  async function refreshWorkoutFromBodyAnalysis(bodyAnalysis) {
+    if (!profile?.id || !bodyAnalysis || typeof bodyAnalysis !== 'object') return
+    setToast('Updating your workout…')
+    try {
+      const workoutPreferences = { ...(profile.preferences?.workout || {}) }
+      const mealPreferences = { ...(profile.preferences?.meal || {}) }
+      const tid = profile.trainer || 'bro'
+      const res = await fetch('/api/generate-plan', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(await jsonHeadersWithAuth()),
+        },
+        body: JSON.stringify({
+          profileId: profile.id,
+          profile: { ...profile, trainer: tid },
+          trainerId: tid,
+          onboardingContext: profile?.onboarding_context,
+          type: 'workout',
+          workoutPreferences,
+          mealPreferences,
+          bodyAnalysis,
+        }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || data.details || 'Workout refresh failed')
+      }
+      await loadPlansAndWeightLogs({ showLoading: false })
+      setToast(null)
+    } catch {
+      setToast('Photo saved; workout refresh failed—try again from Plans')
+      setTimeout(() => setToast(null), 4500)
+    }
+  }
+
+  async function handleProgressPhotoSaved(payload) {
+    await loadProgressPhotos()
+    if (payload?.analysis && typeof payload.analysis === 'object') {
+      await refreshWorkoutFromBodyAnalysis(payload.analysis)
     }
   }
 
@@ -395,56 +435,6 @@ export default function Dashboard() {
       setLoading(false)
     }
   }
-
-  const handleProgressPhotoSaved = useCallback(
-    async (payload) => {
-      await loadProgressPhotos()
-      const analysis = payload?.analysis
-      if (
-        !profile?.id ||
-        !hasUsableWorkoutPlan(plansRef.current?.workout) ||
-        !analysis ||
-        typeof analysis !== 'object'
-      ) {
-        return
-      }
-      const workoutPreferences = { ...(profile.preferences?.workout || {}) }
-      const mealPreferences = { ...(profile.preferences?.meal || {}) }
-      const tid = profile.trainer || 'bro'
-      try {
-        const res = await fetch('/api/generate-plan', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            ...(await jsonHeadersWithAuth()),
-          },
-          body: JSON.stringify({
-            profileId: profile.id,
-            profile: { ...profile, trainer: tid },
-            trainerId: tid,
-            onboardingContext: profile?.onboarding_context,
-            type: 'workout',
-            workoutPreferences,
-            mealPreferences,
-            bodyAnalysis: analysis,
-            programAdjustments:
-              'User just saved a new progress photo. Update the workout routine using the body analysis in this request (lagging areas, posture, priorities). Keep it safe and aligned with their profile.',
-          }),
-        })
-        const data = await res.json().catch(() => ({}))
-        if (!res.ok || !data.success) {
-          console.warn('Workout refresh after progress photo:', data.error || data.details || res.status)
-          return
-        }
-        await Promise.all([loadPlansAndWeightLogs({ showLoading: false }), refreshProfile()])
-        setToast('Workout updated from your latest photo')
-        setTimeout(() => setToast(null), 2800)
-      } catch (e) {
-        console.warn('Workout refresh after progress photo failed:', e)
-      }
-    },
-    [profile, refreshProfile]
-  )
 
   async function handleLogWeight(weightKg) {
     if (!profile) return
@@ -625,6 +615,30 @@ export default function Dashboard() {
     const skTrainer = profile ? getTrainer(profile.trainer) : getTrainer('bro')
     return (
       <div className="dashboard-app-container" style={{ paddingTop: 18, paddingBottom: 24 }}>
+        {toast && (
+          <motion.div
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0 }}
+            style={{
+              position: 'fixed',
+              top: 20,
+              left: '50%',
+              transform: 'translateX(-50%)',
+              padding: '12px 20px',
+              background: 'rgba(14,20,14,0.95)',
+              border: '1px solid rgba(110,231,183,0.3)',
+              borderRadius: 12,
+              color: '#6EE7B7',
+              fontSize: 14,
+              fontWeight: 600,
+              zIndex: 50,
+              boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
+            }}
+          >
+            {toast}
+          </motion.div>
+        )}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -752,9 +766,7 @@ export default function Dashboard() {
           <ProgressTimeline
             photos={progressPhotos}
             onAdd={() => setPhotoModalOpen(true)}
-            onSelectPhoto={() => {
-              if (progressPhotos.length >= 2) setCompareOpen(true)
-            }}
+            onSelectPhoto={(p) => setPhotoDetail(p)}
           />
           {progressPhotos.length >= 2 && (
             <div style={{ padding: '0 18px 16px' }}>
@@ -782,6 +794,12 @@ export default function Dashboard() {
           onClose={() => setCompareOpen(false)}
           photos={progressPhotos}
           profile={profile}
+        />
+        <ProgressPhotoDetailModal
+          isOpen={Boolean(photoDetail)}
+          photo={photoDetail}
+          onClose={() => setPhotoDetail(null)}
+          onCompare={progressPhotos.length >= 2 ? () => setCompareOpen(true) : undefined}
         />
         <TrainerModal
           open={trainerModalOpen}
@@ -823,6 +841,30 @@ export default function Dashboard() {
     }
     return (
       <div className="dashboard-app-container" style={{ paddingTop: 24, paddingBottom: 32 }}>
+        {toast && (
+          <motion.div
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0 }}
+            style={{
+              position: 'fixed',
+              top: 20,
+              left: '50%',
+              transform: 'translateX(-50%)',
+              padding: '12px 20px',
+              background: 'rgba(14,20,14,0.95)',
+              border: '1px solid rgba(110,231,183,0.3)',
+              borderRadius: 12,
+              color: '#6EE7B7',
+              fontSize: 14,
+              fontWeight: 600,
+              zIndex: 50,
+              boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
+            }}
+          >
+            {toast}
+          </motion.div>
+        )}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, marginBottom: 24 }}>
           <div>
             <h1 style={{ fontSize: 26, fontWeight: 800, letterSpacing: -0.8 }}>
@@ -924,9 +966,7 @@ export default function Dashboard() {
           <ProgressTimeline
             photos={progressPhotos}
             onAdd={() => setPhotoModalOpen(true)}
-            onSelectPhoto={() => {
-              if (progressPhotos.length >= 2) setCompareOpen(true)
-            }}
+            onSelectPhoto={(p) => setPhotoDetail(p)}
           />
           {progressPhotos.length >= 2 && (
             <div style={{ padding: '0 18px 16px' }}>
@@ -946,6 +986,12 @@ export default function Dashboard() {
           onClose={() => setCompareOpen(false)}
           photos={progressPhotos}
           profile={profile}
+        />
+        <ProgressPhotoDetailModal
+          isOpen={Boolean(photoDetail)}
+          photo={photoDetail}
+          onClose={() => setPhotoDetail(null)}
+          onCompare={progressPhotos.length >= 2 ? () => setCompareOpen(true) : undefined}
         />
 
         <div
@@ -1317,9 +1363,7 @@ export default function Dashboard() {
         <ProgressTimeline
           photos={progressPhotos}
           onAdd={() => setPhotoModalOpen(true)}
-          onSelectPhoto={() => {
-            if (progressPhotos.length >= 2) setCompareOpen(true)
-          }}
+          onSelectPhoto={(p) => setPhotoDetail(p)}
         />
         {progressPhotos.length >= 2 && (
           <div style={{ padding: '0 18px 16px' }}>
@@ -1340,6 +1384,12 @@ export default function Dashboard() {
         onClose={() => setCompareOpen(false)}
         photos={progressPhotos}
         profile={profile}
+      />
+      <ProgressPhotoDetailModal
+        isOpen={Boolean(photoDetail)}
+        photo={photoDetail}
+        onClose={() => setPhotoDetail(null)}
+        onCompare={progressPhotos.length >= 2 ? () => setCompareOpen(true) : undefined}
       />
 
       {/* Adjust program (free-form) */}

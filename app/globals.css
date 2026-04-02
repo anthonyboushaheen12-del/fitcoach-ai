@@ -216,6 +216,13 @@ input:focus, textarea:focus, select:focus {
   padding-right: max(12px, env(safe-area-inset-right, 0px));
 }
 
+/* Extra bottom breathing room above AppShell mobile tab bar (main also pads for nav height). */
+@media (max-width: 767px) {
+  .dashboard-app-container {
+    padding-bottom: 12px;
+  }
+}
+
 @media (min-width: 768px) {
   .dashboard-app-container {
     max-width: 1200px;

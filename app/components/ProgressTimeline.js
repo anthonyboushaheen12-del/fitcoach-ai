@@ -1,6 +1,6 @@
 'use client'
 
-import ProgressPhotoBodyBreakdown from './ProgressPhotoBodyBreakdown'
+import ProgressMuscleAssessment from './ProgressMuscleAssessment'
 
 export default function ProgressTimeline({ photos, onAdd, onSelectPhoto }) {
   if (!photos?.length) {
@@ -13,13 +13,12 @@ export default function ProgressTimeline({ photos, onAdd, onSelectPhoto }) {
           type="button"
           onClick={() => onAdd?.()}
           style={{
-            padding: '14px 22px',
-            minHeight: 48,
-            borderRadius: 14,
+            padding: '12px 20px',
+            borderRadius: 12,
             border: 'none',
             background: 'linear-gradient(135deg, #10B981, #6EE7B7)',
             color: '#070B07',
-            fontSize: 15,
+            fontSize: 14,
             fontWeight: 700,
           }}
         >
@@ -28,6 +27,13 @@ export default function ProgressTimeline({ photos, onAdd, onSelectPhoto }) {
       </div>
     )
   }
+
+  const latest = photos.length > 0 ? photos[photos.length - 1] : null
+  const latestAnalysis = latest?.analysis && typeof latest.analysis === 'object' ? latest.analysis : null
+  const showLatestMuscle =
+    latestAnalysis &&
+    latestAnalysis.muscleAssessment &&
+    typeof latestAnalysis.muscleAssessment === 'object'
 
   return (
     <div>
@@ -97,6 +103,26 @@ export default function ProgressTimeline({ photos, onAdd, onSelectPhoto }) {
         </button>
       ))}
     </div>
+    {showLatestMuscle && (
+      <div
+        style={{
+          margin: '0 18px 14px',
+          padding: 14,
+          borderRadius: 14,
+          background: 'rgba(16,185,129,0.06)',
+          border: '1px solid rgba(110,231,183,0.12)',
+        }}
+      >
+        <div style={{ fontSize: 12, fontWeight: 700, color: '#fff', marginBottom: 4 }}>Latest check-in</div>
+        <div style={{ fontSize: 10, color: '#4A6B58', marginBottom: 10, lineHeight: 1.35 }}>
+          Part-by-part snapshot from your most recent photo
+          {latest?.created_at
+            ? ` · ${new Date(latest.created_at).toLocaleDateString('en', { month: 'short', day: 'numeric' })}`
+            : ''}
+        </div>
+        <ProgressMuscleAssessment analysis={latestAnalysis} compact />
+      </div>
+    )}
     <div
       style={{
         padding: '0 18px 14px',
@@ -114,20 +140,18 @@ export default function ProgressTimeline({ photos, onAdd, onSelectPhoto }) {
         type="button"
         onClick={() => onAdd?.()}
         style={{
-          padding: '10px 16px',
-          minHeight: 44,
+          padding: '6px 12px',
           borderRadius: 100,
           background: 'rgba(110,231,183,0.1)',
           border: '1px solid rgba(110,231,183,0.2)',
           color: '#6EE7B7',
-          fontSize: 12,
+          fontSize: 11,
           fontWeight: 700,
         }}
       >
         + Add photo
       </button>
     </div>
-    <ProgressPhotoBodyBreakdown photos={photos} />
     </div>
   )
 }

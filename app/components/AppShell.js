@@ -168,7 +168,7 @@ export default function AppShell({ children }) {
           paddingBottom:
             hideNav || isDesktop
               ? 0
-              : 'calc(70px + env(safe-area-inset-bottom, 0px))',
+              : 'calc(80px + env(safe-area-inset-bottom, 0px))',
         }}
       >
         <AnimatePresence mode="wait">
@@ -203,7 +203,9 @@ function BottomNav({ tabs, pathname, router }) {
         maxWidth: '100%',
         display: 'flex',
         justifyContent: 'space-around',
-        padding: `8px 0 calc(14px + env(safe-area-inset-bottom, 0px))`,
+        boxSizing: 'border-box',
+        minHeight: 'calc(52px + env(safe-area-inset-bottom, 0px))',
+        padding: `8px max(0px, env(safe-area-inset-right, 0px)) calc(12px + env(safe-area-inset-bottom, 0px)) max(0px, env(safe-area-inset-left, 0px))`,
         background: 'rgba(7,11,7,0.92)',
         borderTop: '1px solid rgba(110,231,183,0.06)',
         backdropFilter: 'blur(20px)',

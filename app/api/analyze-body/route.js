@@ -92,7 +92,12 @@ Respond ONLY with valid JSON, no markdown, no code fences:
 
     const text = response.content[0].text.trim()
     const clean = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
-    const analysis = JSON.parse(clean)
+    let analysis
+    try {
+      analysis = JSON.parse(clean)
+    } catch (parseErr) {
+      throw parseErr
+    }
     return Response.json({ analysis })
   } catch (err) {
     console.error('Body analysis error:', err)
