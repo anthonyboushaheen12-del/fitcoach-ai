@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { motion } from 'framer-motion'
 import { supabase } from '../../lib/supabase'
@@ -222,6 +222,7 @@ export default function Dashboard() {
   const { user, profile: authProfile, loading: authLoading, profileLoading, refreshProfile } = useAuth()
   const profileResolutionTimedOut = useProfileResolutionTimeout(user, authProfile, 3000)
   const [plans, setPlans] = useState({ workout: null, meal: null })
+  const plansRef = useRef(plans)
   const [weightLogs, setWeightLogs] = useState([])
   const [loading, setLoading] = useState(true)
   const [weightModalOpen, setWeightModalOpen] = useState(false)
@@ -244,6 +245,10 @@ export default function Dashboard() {
 
   const profile = authProfile
   const trainer = profile ? getTrainer(profile.trainer) : getTrainer('bro')
+
+  useEffect(() => {
+    plansRef.current = plans
+  }, [plans])
 
   useEffect(() => {
     if (!user) {
@@ -390,6 +395,56 @@ export default function Dashboard() {
       setLoading(false)
     }
   }
+
+  const handleProgressPhotoSaved = useCallback(
+    async (payload) => {
+      await loadProgressPhotos()
+      const analysis = payload?.analysis
+      if (
+        !profile?.id ||
+        !hasUsableWorkoutPlan(plansRef.current?.workout) ||
+        !analysis ||
+        typeof analysis !== 'object'
+      ) {
+        return
+      }
+      const workoutPreferences = { ...(profile.preferences?.workout || {}) }
+      const mealPreferences = { ...(profile.preferences?.meal || {}) }
+      const tid = profile.trainer || 'bro'
+      try {
+        const res = await fetch('/api/generate-plan', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(await jsonHeadersWithAuth()),
+          },
+          body: JSON.stringify({
+            profileId: profile.id,
+            profile: { ...profile, trainer: tid },
+            trainerId: tid,
+            onboardingContext: profile?.onboarding_context,
+            type: 'workout',
+            workoutPreferences,
+            mealPreferences,
+            bodyAnalysis: analysis,
+            programAdjustments:
+              'User just saved a new progress photo. Update the workout routine using the body analysis in this request (lagging areas, posture, priorities). Keep it safe and aligned with their profile.',
+          }),
+        })
+        const data = await res.json().catch(() => ({}))
+        if (!res.ok || !data.success) {
+          console.warn('Workout refresh after progress photo:', data.error || data.details || res.status)
+          return
+        }
+        await Promise.all([loadPlansAndWeightLogs({ showLoading: false }), refreshProfile()])
+        setToast('Workout updated from your latest photo')
+        setTimeout(() => setToast(null), 2800)
+      } catch (e) {
+        console.warn('Workout refresh after progress photo failed:', e)
+      }
+    },
+    [profile, refreshProfile]
+  )
 
   async function handleLogWeight(weightKg) {
     if (!profile) return
@@ -720,7 +775,7 @@ export default function Dashboard() {
           isOpen={photoModalOpen}
           onClose={() => setPhotoModalOpen(false)}
           profile={profile}
-          onSaved={loadProgressPhotos}
+          onSaved={handleProgressPhotoSaved}
         />
         <CompareModal
           isOpen={compareOpen}
@@ -884,7 +939,7 @@ export default function Dashboard() {
           isOpen={photoModalOpen}
           onClose={() => setPhotoModalOpen(false)}
           profile={profile}
-          onSaved={loadProgressPhotos}
+          onSaved={handleProgressPhotoSaved}
         />
         <CompareModal
           isOpen={compareOpen}
@@ -1278,7 +1333,7 @@ export default function Dashboard() {
         isOpen={photoModalOpen}
         onClose={() => setPhotoModalOpen(false)}
         profile={profile}
-        onSaved={loadProgressPhotos}
+        onSaved={handleProgressPhotoSaved}
       />
       <CompareModal
         isOpen={compareOpen}

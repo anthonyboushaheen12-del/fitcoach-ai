@@ -1,5 +1,7 @@
 'use client'
 
+import ProgressPhotoBodyBreakdown from './ProgressPhotoBodyBreakdown'
+
 export default function ProgressTimeline({ photos, onAdd, onSelectPhoto }) {
   if (!photos?.length) {
     return (
@@ -11,12 +13,13 @@ export default function ProgressTimeline({ photos, onAdd, onSelectPhoto }) {
           type="button"
           onClick={() => onAdd?.()}
           style={{
-            padding: '12px 20px',
-            borderRadius: 12,
+            padding: '14px 22px',
+            minHeight: 48,
+            borderRadius: 14,
             border: 'none',
             background: 'linear-gradient(135deg, #10B981, #6EE7B7)',
             color: '#070B07',
-            fontSize: 14,
+            fontSize: 15,
             fontWeight: 700,
           }}
         >
@@ -111,18 +114,20 @@ export default function ProgressTimeline({ photos, onAdd, onSelectPhoto }) {
         type="button"
         onClick={() => onAdd?.()}
         style={{
-          padding: '6px 12px',
+          padding: '10px 16px',
+          minHeight: 44,
           borderRadius: 100,
           background: 'rgba(110,231,183,0.1)',
           border: '1px solid rgba(110,231,183,0.2)',
           color: '#6EE7B7',
-          fontSize: 11,
+          fontSize: 12,
           fontWeight: 700,
         }}
       >
         + Add photo
       </button>
     </div>
+    <ProgressPhotoBodyBreakdown photos={photos} />
     </div>
   )
 }

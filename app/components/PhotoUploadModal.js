@@ -43,6 +43,7 @@ export default function PhotoUploadModal({ isOpen, onClose, profile, onSaved }) 
     const wVal = weight !== '' ? Number(weight) : profile.weight_kg
     const notesVal = notes?.trim() || null
     let saved = 0
+    let lastSavedAnalysis = null
     const failures = []
     try {
       for (let i = 0; i < files.length; i++) {
@@ -76,6 +77,7 @@ export default function PhotoUploadModal({ isOpen, onClose, profile, onSaved }) 
             throw new Error(err.error || 'Save failed')
           }
           saved++
+          lastSavedAnalysis = analysis
         } catch (oneErr) {
           failures.push(`#${i + 1}: ${oneErr?.message || 'failed'}`)
         }
@@ -83,7 +85,7 @@ export default function PhotoUploadModal({ isOpen, onClose, profile, onSaved }) 
 
       if (saved > 0) {
         setNotes('')
-        onSaved?.()
+        onSaved?.({ savedCount: saved, analysis: lastSavedAnalysis })
       }
       if (failures.length) {
         const suffix =

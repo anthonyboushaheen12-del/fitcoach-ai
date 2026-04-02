@@ -25,63 +25,19 @@ const FALLBACK_ANALYSIS = {
 }
 
 export async function POST(request) {
-  // #region agent log
-  const _dbg = (loc, msg, data, hypothesisId) =>
-    fetch('http://127.0.0.1:7838/ingest/7cadc763-027f-402a-b4fb-5d3dcb45df0f', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'ca100b' },
-      body: JSON.stringify({
-        sessionId: 'ca100b',
-        runId: 'pre-fix',
-        hypothesisId,
-        location: loc,
-        message: msg,
-        data,
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {})
-  // #endregion
   try {
     const body = await request.json()
     const { image, mediaType = 'image/jpeg', profile } = body
 
-    // #region agent log
-    await _dbg(
-      'analyze-body/route.js:parsed',
-      'request parsed',
-      {
-        hasImage: !!image && typeof image === 'string',
-        imageLen: typeof image === 'string' ? image.length : 0,
-        hasProfile: !!profile,
-      },
-      'H4'
-    )
-    // #endregion
-
     if (!image || typeof image !== 'string') {
-      // #region agent log
-      await _dbg('analyze-body/route.js:no-image', 'branch no image', {}, 'H4')
-      // #endregion
       return Response.json({ error: 'No image provided', analysis: FALLBACK_ANALYSIS }, { status: 200 })
     }
 
-    const hasKey = !!process.env.ANTHROPIC_API_KEY
-    // #region agent log
-    await _dbg('analyze-body/route.js:key', 'anthropic key present', { hasKey }, 'H1')
-    // #endregion
-
-    if (!hasKey) {
-      // #region agent log
-      await _dbg('analyze-body/route.js:no-key', 'branch missing ANTHROPIC_API_KEY', {}, 'H1')
-      // #endregion
+    if (!process.env.ANTHROPIC_API_KEY) {
       return Response.json({ analysis: FALLBACK_ANALYSIS, warning: 'Server misconfiguration' }, { status: 200 })
     }
 
     const mt = ['image/jpeg', 'image/png', 'image/webp'].includes(mediaType) ? mediaType : 'image/jpeg'
-
-    // #region agent log
-    await _dbg('analyze-body/route.js:pre-anthropic', 'calling anthropic.messages.create', { mediaType: mt }, 'H2')
-    // #endregion
 
     const response = await anthropic.messages.create({
       model: 'claude-sonnet-4-20250514',
@@ -134,55 +90,11 @@ Respond ONLY with valid JSON, no markdown, no code fences:
       ],
     })
 
-    // #region agent log
-    const _b0 = response?.content?.[0]
-    await _dbg(
-      'analyze-body/route.js:anthropic-response',
-      'anthropic returned',
-      {
-        blockType: _b0?.type,
-        textLen: _b0?.type === 'text' ? String(_b0.text || '').length : 0,
-      },
-      'H2-H5'
-    )
-    // #endregion
-
     const text = response.content[0].text.trim()
     const clean = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
-    let analysis
-    try {
-      analysis = JSON.parse(clean)
-    } catch (parseErr) {
-      // #region agent log
-      await _dbg(
-        'analyze-body/route.js:json-parse',
-        'JSON.parse failed',
-        {
-          cleanPreview: clean.slice(0, 120),
-          parseMsg: parseErr?.message?.slice?.(0, 160),
-        },
-        'H3-H5'
-      )
-      // #endregion
-      throw parseErr
-    }
-    // #region agent log
-    await _dbg('analyze-body/route.js:success', 'parsed analysis OK', { keys: analysis ? Object.keys(analysis) : [] }, 'H3')
-    // #endregion
+    const analysis = JSON.parse(clean)
     return Response.json({ analysis })
   } catch (err) {
-    // #region agent log
-    await _dbg(
-      'analyze-body/route.js:catch',
-      'exception',
-      {
-        name: err?.name,
-        msg: err?.message?.slice?.(0, 220),
-        status: err?.status,
-      },
-      'H2-H3-H5'
-    )
-    // #endregion
     console.error('Body analysis error:', err)
     return Response.json(
       {

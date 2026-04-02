@@ -3,7 +3,6 @@ import {
   createSupabaseServiceRoleClient,
   createSupabaseUserJwtClient,
   getBearerToken,
-  getServiceRoleKeyDiagnostics,
 } from '../../../lib/supabase-api-route'
 
 const BUCKET = 'progress-photos'
@@ -39,60 +38,25 @@ async function insertProgressPhotoRow(userSb, serviceSb, row) {
   if (serviceSb) {
     const ins = await serviceSb.from('progress_photos').insert(row).select().single()
     if (!ins.error) {
-      return { data: ins.data, error: null, path: 'service_insert' }
+      return { data: ins.data, error: null }
     }
-    // Invalid/pasted anon key as "service role" still enforces RLS — fall back to RPC.
     if (isRlsPolicyError(ins.error)) {
-      // #region agent log
-      fetch('http://127.0.0.1:7838/ingest/7cadc763-027f-402a-b4fb-5d3dcb45df0f', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'ca100b' },
-        body: JSON.stringify({
-          sessionId: 'ca100b',
-          runId: 'post-fix',
-          hypothesisId: 'H1',
-          location: 'progress-photo/insertProgressPhotoRow',
-          message: 'service insert RLS, trying RPC',
-          data: { msgSlice: (ins.error?.message || '').slice(0, 80) },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {})
-      // #endregion
       console.warn('progress-photo: service-role insert hit RLS, falling back to RPC')
-      const rpc = await rpcInsertProgressPhoto(userSb, row)
-      return { data: rpc.data, error: rpc.error, path: 'rpc_after_service_rls' }
+      return await rpcInsertProgressPhoto(userSb, row)
     }
-    return { data: ins.data, error: ins.error, path: 'service_insert' }
+    return { data: ins.data, error: ins.error }
   }
 
-  // No service role: try normal authenticated INSERT first (JWT + anon client).
   const direct = await userSb.from('progress_photos').insert(row).select().single()
   if (!direct.error) {
-    return { data: direct.data, error: null, path: 'user_direct' }
+    return { data: direct.data, error: null }
   }
   if (!isRlsPolicyError(direct.error)) {
-    return { data: direct.data, error: direct.error, path: 'user_direct' }
+    return { data: direct.data, error: direct.error }
   }
 
-  // #region agent log
-  fetch('http://127.0.0.1:7838/ingest/7cadc763-027f-402a-b4fb-5d3dcb45df0f', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'ca100b' },
-    body: JSON.stringify({
-      sessionId: 'ca100b',
-      runId: 'post-fix',
-      hypothesisId: 'H2',
-      location: 'progress-photo/insertProgressPhotoRow',
-      message: 'user direct insert RLS, trying RPC',
-      data: { msgSlice: (direct.error?.message || '').slice(0, 80) },
-      timestamp: Date.now(),
-    }),
-  }).catch(() => {})
-  // #endregion
   console.warn('progress-photo: user JWT insert hit RLS, falling back to RPC')
-
-  const rpc = await rpcInsertProgressPhoto(userSb, row)
-  return { data: rpc.data, error: rpc.error, path: 'rpc_after_user_rls' }
+  return await rpcInsertProgressPhoto(userSb, row)
 }
 
 export async function GET(request) {
@@ -183,7 +147,7 @@ export async function POST(request) {
       .maybeSingle()
 
     if (profileLookupErr) {
-      console.error('progress-photo profile lookup:', profileLookupErr)
+      console.error('progressPhoto profile lookup:', profileLookupErr)
       return Response.json({ error: 'Could not verify profile' }, { status: 500 })
     }
     if (!ownedProfile?.id) {
@@ -197,21 +161,6 @@ export async function POST(request) {
     }
 
     const serviceSb = createSupabaseServiceRoleClient()
-    // #region agent log
-    fetch('http://127.0.0.1:7838/ingest/7cadc763-027f-402a-b4fb-5d3dcb45df0f', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'ca100b' },
-      body: JSON.stringify({
-        sessionId: 'ca100b',
-        runId: 'post-fix',
-        hypothesisId: 'H1-H2',
-        location: 'progress-photo/POST',
-        message: 'after service client',
-        data: { ...getServiceRoleKeyDiagnostics(), hasServiceClient: !!serviceSb },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {})
-    // #endregion
     const effectiveProfileId = ownedProfile.id
     const uid = user.id
     const storageClient = serviceSb || userSb
@@ -227,7 +176,7 @@ export async function POST(request) {
       })
 
     if (uploadError) {
-      console.error('progress-photo upload:', uploadError)
+      console.error('progressPhoto upload:', uploadError)
       return Response.json({ error: uploadError.message }, { status: 500 })
     }
 
@@ -245,39 +194,7 @@ export async function POST(request) {
       photo_type: photoType || 'front',
     }
 
-    const insertOutcome = await insertProgressPhotoRow(userSb, serviceSb, row)
-    const { data: inserted, error: insertError } = insertOutcome
-
-    // #region agent log
-    fetch('http://127.0.0.1:7838/ingest/7cadc763-027f-402a-b4fb-5d3dcb45df0f', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'ca100b' },
-      body: JSON.stringify({
-        sessionId: 'ca100b',
-        runId: 'post-fix',
-        hypothesisId: 'H2-H3',
-        location: 'progress-photo/POST',
-        message: insertError ? 'insert failed' : 'insert ok',
-        data: {
-          path: insertOutcome.path,
-          errSlice: insertError ? (insertError.message || '').slice(0, 120) : null,
-        },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {})
-    // #endregion
-
-    console.log(
-      JSON.stringify({
-        tag: 'progress-photo-debug',
-        sessionId: 'ca100b',
-        hasServiceClient: !!serviceSb,
-        keyDiag: getServiceRoleKeyDiagnostics(),
-        insertPath: insertOutcome.path,
-        insertCode: insertError?.code ?? null,
-        insertMsg: insertError?.message?.slice?.(0, 160) ?? null,
-      })
-    )
+    const { data: inserted, error: insertError } = await insertProgressPhotoRow(userSb, serviceSb, row)
 
     if (insertError) {
       await storageClient.storage.from(BUCKET).remove([storagePath])
@@ -291,7 +208,7 @@ export async function POST(request) {
           : isRlsPolicyError(insertError)
             ? `${msg} Fix: run supabase-progress-photo-rpc.sql in Supabase (ALTER FUNCTION ... OWNER TO postgres), or set SUPABASE_SERVICE_ROLE_KEY to the service_role secret (not the anon key).`
             : msg
-      console.error('progress-photo insert:', insertError)
+      console.error('progressPhoto insert:', insertError)
       return Response.json({ error: hint }, { status: 500 })
     }
 
@@ -312,7 +229,7 @@ export async function POST(request) {
       photo: { ...inserted, signedUrl: signed?.signedUrl ?? null },
     })
   } catch (e) {
-    console.error('progress-photo POST:', e)
+    console.error('progressPhoto POST:', e)
     return Response.json({ error: e.message || 'Failed' }, { status: 500 })
   }
 }
