@@ -39,10 +39,15 @@ html {
   -webkit-tap-highlight-color: transparent;
   min-height: 100dvh;
   min-height: -webkit-fill-available;
+  overflow-x: hidden;
+  overflow-x: clip;
+  max-width: 100%;
+  overscroll-behavior-x: none;
 }
 
 html, body {
   overscroll-behavior-y: none;
+  overscroll-behavior-x: none;
 }
 
 body {
@@ -54,6 +59,9 @@ body {
   touch-action: manipulation;
   min-height: 100dvh;
   min-height: -webkit-fill-available;
+  overflow-x: hidden;
+  overflow-x: clip;
+  max-width: 100%;
 }
 
 /* Scrollbar hiding */
@@ -209,7 +217,7 @@ input:focus, textarea:focus, select:focus {
 .dashboard-app-container {
   box-sizing: border-box;
   width: 100%;
-  max-width: min(1200px, calc(100vw - 20px));
+  max-width: min(1200px, 100%);
   margin-left: auto;
   margin-right: auto;
   padding-left: max(12px, env(safe-area-inset-left, 0px));

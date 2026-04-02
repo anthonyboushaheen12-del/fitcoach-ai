@@ -162,6 +162,8 @@ export default function AppShell({ children }) {
                 width: `calc(100vw - ${SIDEBAR_W}px)`,
                 maxWidth: 'none',
               }),
+          minWidth: 0,
+          overflowX: 'hidden',
           position: 'relative',
           zIndex: 1,
           minHeight: 'min(100vh, 100dvh)',

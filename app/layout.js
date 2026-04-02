@@ -25,12 +25,14 @@ export default function RootLayout({ children }) {
         <div className="ambient-pink" style={{ top: 100, right: -150 }} />
         <div className="ambient-yellow" style={{ bottom: -80, left: -80 }} />
 
-        <SplashScreen onComplete={handleSplashComplete} />
+        <div style={{ position: 'relative', zIndex: 1, overflowX: 'hidden', minHeight: '100dvh' }}>
+          <SplashScreen onComplete={handleSplashComplete} />
 
-        <AuthProvider>
-          <AuthLoadingSafetyNet />
-          <AppShell>{children}</AppShell>
-        </AuthProvider>
+          <AuthProvider>
+            <AuthLoadingSafetyNet />
+            <AppShell>{children}</AppShell>
+          </AuthProvider>
+        </div>
       </body>
     </html>
   )

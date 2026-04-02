@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import dynamic from 'next/dynamic'
 import { useRouter } from 'next/navigation'
 import { motion } from 'framer-motion'
 import { supabase } from '../../lib/supabase'
@@ -8,19 +9,26 @@ import { getTrainer } from '../../lib/trainers'
 import { useAuth } from '../components/AuthProvider'
 import BrandedAuthLoading from '../components/BrandedAuthLoading'
 import { useProfileResolutionTimeout } from '../hooks/useProfileResolutionTimeout'
-import ProgressChart from '../components/ProgressChart'
-import WeightModal from '../components/WeightModal'
-import TrainerModal from '../components/TrainerModal'
 import ExerciseRow from '../components/ExerciseRow'
-import WorkoutMuscleMap from '../components/WorkoutMuscleMap'
-import FoodLogModal from '../components/FoodLogModal'
-import LogWorkoutModal from '../components/LogWorkoutModal'
 import BodyImageSlot from '../components/BodyImageSlot'
-import ProgressTimeline from '../components/ProgressTimeline'
-import PhotoUploadModal from '../components/PhotoUploadModal'
-import CompareModal from '../components/CompareModal'
-import ProgressPhotoDetailModal from '../components/ProgressPhotoDetailModal'
-import { BodyFatLineChart } from '../components/ProgressCharts'
+
+const ProgressChart = dynamic(() => import('../components/ProgressChart'), { ssr: false, loading: () => null })
+const WeightModal = dynamic(() => import('../components/WeightModal'), { ssr: false, loading: () => null })
+const TrainerModal = dynamic(() => import('../components/TrainerModal'), { ssr: false, loading: () => null })
+const WorkoutMuscleMap = dynamic(() => import('../components/WorkoutMuscleMap'), { ssr: false, loading: () => null })
+const FoodLogModal = dynamic(() => import('../components/FoodLogModal'), { ssr: false, loading: () => null })
+const LogWorkoutModal = dynamic(() => import('../components/LogWorkoutModal'), { ssr: false, loading: () => null })
+const ProgressTimeline = dynamic(() => import('../components/ProgressTimeline'), { ssr: false, loading: () => null })
+const PhotoUploadModal = dynamic(() => import('../components/PhotoUploadModal'), { ssr: false, loading: () => null })
+const CompareModal = dynamic(() => import('../components/CompareModal'), { ssr: false, loading: () => null })
+const ProgressPhotoDetailModal = dynamic(() => import('../components/ProgressPhotoDetailModal'), {
+  ssr: false,
+  loading: () => null,
+})
+const BodyFatLineChart = dynamic(
+  () => import('../components/ProgressCharts').then((m) => m.BodyFatLineChart),
+  { ssr: false, loading: () => null }
+)
 
 async function jsonHeadersWithAuth() {
   const headers = {}
@@ -270,23 +278,6 @@ export default function Dashboard() {
     }
   }, [user, profile?.id, profileLoading, missingProfileId])
 
-  useEffect(() => {
-    if (!profile?.id) return
-    const today = new Date().toISOString().split('T')[0]
-    fetch(`/api/meal-log?profileId=${profile.id}&date=${today}`)
-      .then((r) => r.json())
-      .then((data) => setTodayMeals(data.meals || []))
-      .catch(() => setTodayMeals([]))
-  }, [profile?.id])
-
-  useEffect(() => {
-    if (!profile?.id) return
-    fetch(`/api/workout-log?profileId=${profile.id}&limit=10`)
-      .then((r) => r.json())
-      .then((data) => setRecentWorkouts(data.workouts || []))
-      .catch(() => setRecentWorkouts([]))
-  }, [profile?.id])
-
   async function loadProgressPhotos() {
     if (!profile?.id) return
     try {
@@ -344,7 +335,33 @@ export default function Dashboard() {
   }
 
   useEffect(() => {
-    loadProgressPhotos()
+    if (!profile?.id) return
+    const profileId = profile.id
+    const today = new Date().toISOString().split('T')[0]
+    let cancelled = false
+    ;(async () => {
+      try {
+        const headers = await jsonHeadersWithAuth()
+        const [photoJson, mealJson, workoutJson] = await Promise.all([
+          fetch(`/api/progress-photo?profileId=${profileId}`, { headers }).then((r) => r.json()).catch(() => ({})),
+          fetch(`/api/meal-log?profileId=${profileId}&date=${today}`).then((r) => r.json()).catch(() => ({})),
+          fetch(`/api/workout-log?profileId=${profileId}&limit=10`).then((r) => r.json()).catch(() => ({})),
+        ])
+        if (cancelled) return
+        setProgressPhotos(photoJson.photos || [])
+        setTodayMeals(mealJson.meals || [])
+        setRecentWorkouts(workoutJson.workouts || [])
+      } catch {
+        if (!cancelled) {
+          setProgressPhotos([])
+          setTodayMeals([])
+          setRecentWorkouts([])
+        }
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
   }, [profile?.id])
 
   useEffect(() => {
@@ -399,12 +416,12 @@ export default function Dashboard() {
       const queries = Promise.all([
         supabase
           .from('plans')
-          .select('*')
+          .select('id, profile_id, type, content, active, created_at')
           .eq('profile_id', profileId)
           .eq('active', true),
         supabase
           .from('weight_logs')
-          .select('*')
+          .select('weight_kg, logged_at, created_at, profile_id')
           .eq('profile_id', profileId)
           .order('created_at', { ascending: true })
           .limit(60),
