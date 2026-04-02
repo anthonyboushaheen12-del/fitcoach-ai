@@ -78,6 +78,24 @@ export function AuthProvider({ children }) {
 
     const initAuth = async () => {
       try {
+        if (typeof window !== 'undefined') {
+          const params = new URLSearchParams(window.location.search)
+          if (params.get('signout') === '1') {
+            await supabase.auth.signOut()
+            if (cancelled) return
+            setUser(null)
+            setProfile(null)
+            localStorage.removeItem('profileId')
+            localStorage.removeItem('profile')
+            localStorage.removeItem('onboardingContext')
+            localStorage.removeItem('aspirationGoal')
+            const url = new URL(window.location.href)
+            url.searchParams.delete('signout')
+            const next = `${url.pathname}${url.search}${url.hash}`
+            window.history.replaceState({}, '', next || url.pathname)
+          }
+        }
+
         let u = null
         try {
           const { data } = await race(supabase.auth.getUser(), AUTH_INIT_MS, 'getUser')

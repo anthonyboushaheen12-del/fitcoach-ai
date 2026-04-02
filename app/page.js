@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { motion } from 'framer-motion'
 import { useAuth } from './components/AuthProvider'
@@ -9,7 +9,7 @@ import { supabase } from '../lib/supabase'
 
 export default function AuthPage() {
   const router = useRouter()
-  const { user, profile, loading: authLoading, profileLoading, signIn, signUp } = useAuth()
+  const { user, profile, loading: authLoading, profileLoading, signIn, signUp, signOut } = useAuth()
   const [tab, setTab] = useState('signin')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -20,19 +20,82 @@ export default function AuthPage() {
   const [resendSent, setResendSent] = useState(false)
   const [resending, setResending] = useState(false)
 
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const t = new URLSearchParams(window.location.search).get('tab')
+    if (t === 'signup') setTab('signup')
+    else if (t === 'signin') setTab('signin')
+  }, [])
+
   // Wait for auth + profile resolution — do not show sign-in until both are settled (avoids fake "signed out" flash).
   if (authLoading || profileLoading) {
     return <BrandedAuthLoading />
   }
 
-  // Only redirect once profile has been resolved (not loading)
-  if (user && profile) {
-    router.replace('/dashboard')
-    return null
-  }
   if (user && !profile) {
     router.replace('/onboarding')
     return null
+  }
+
+  if (user && profile) {
+    const email = user.email || 'your account'
+    const displayName = profile.name?.trim()
+    return (
+      <div style={{ minHeight: '100vh', padding: '40px 24px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+        <motion.div
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="glass"
+          style={{ width: '100%', maxWidth: 360, padding: 28, textAlign: 'center' }}
+        >
+          <h1 style={{ fontSize: 22, fontWeight: 800, color: '#fff', marginBottom: 8 }}>
+            Welcome back{displayName ? `, ${displayName.split(/\s+/)[0]}` : ''}
+          </h1>
+          <p style={{ fontSize: 14, color: '#8BAFA0', lineHeight: 1.5, marginBottom: 20 }}>
+            You’re signed in as <span style={{ color: '#6EE7B7' }}>{email}</span>. Open the app, or sign out to use a different account.
+          </p>
+          <button
+            type="button"
+            onClick={() => router.push('/dashboard')}
+            style={{
+              width: '100%',
+              padding: 16,
+              borderRadius: 14,
+              border: 'none',
+              background: 'linear-gradient(135deg, #10B981, #6EE7B7)',
+              color: '#070B07',
+              fontSize: 15,
+              fontWeight: 700,
+              marginBottom: 10,
+              cursor: 'pointer',
+            }}
+          >
+            Go to dashboard
+          </button>
+          <button
+            type="button"
+            onClick={() => signOut()}
+            style={{
+              width: '100%',
+              padding: 14,
+              borderRadius: 14,
+              border: '1px solid rgba(110,231,183,0.25)',
+              background: 'transparent',
+              color: '#A7C4B8',
+              fontSize: 14,
+              fontWeight: 600,
+              cursor: 'pointer',
+              marginBottom: 14,
+            }}
+          >
+            Use a different account
+          </button>
+          <p style={{ fontSize: 12, color: '#2D5B3F', lineHeight: 1.45, margin: 0 }}>
+            Sharing this app? Send others your link to <strong style={{ color: '#5BA37A' }}>/join</strong> so they always see sign-in options first.
+          </p>
+        </motion.div>
+      </div>
+    )
   }
 
   const inputStyle = {

@@ -45,4 +45,6 @@ See [`.env.example`](.env.example) for a template. For SQL checks on policies an
 
 If the SQL Editor shows **`relation "progress_photos" already exists`**, stop using a handwritten `CREATE TABLE progress_photos` fragment. Run [`supabase-progress-photos-safe-rerun.sql`](supabase-progress-photos-safe-rerun.sql) instead (it skips recreating the table, repairs missing columns, and applies storage + split RLS policies), then run [`supabase-progress-photo-rpc.sql`](supabase-progress-photo-rpc.sql).
 
+**Sharing the app:** See [docs/SHARING_AND_AUTH.md](docs/SHARING_AND_AUTH.md) for Supabase redirect URLs, public `/join` link, and `?signout=1`.
+
 If saving progress photos still returns a row-level security error: (1) run [`supabase-progress-photos-rls-insert-fix.sql`](supabase-progress-photos-rls-insert-fix.sql) or the safe-rerun script above; (2) run the **full** [`supabase-progress-photo-rpc.sql`](supabase-progress-photo-rpc.sql) (including `ALTER FUNCTION … OWNER TO postgres` and `set_config('row_security', 'off', true)` inside the function). The API tries **user JWT insert first**, then **RPC**, then (when configured) **service_role insert**.
