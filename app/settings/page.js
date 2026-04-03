@@ -17,7 +17,7 @@ export default function Settings() {
   const profileResolutionTimedOut = useProfileResolutionTimeout(user, authProfile, 3000)
   const [profile, setProfile] = useState(authProfile)
   const [weightLogs, setWeightLogs] = useState([])
-  const [saving, setSaved] = useState(false)
+  const [saving, setSaving] = useState(false)
   const [weightModalOpen, setWeightModalOpen] = useState(false)
   const [trainerModalOpen, setTrainerModalOpen] = useState(false)
   const [savedMsg, setSavedMsg] = useState(false)
@@ -66,30 +66,33 @@ export default function Settings() {
     setWeightLogs(built)
   }
 
-  async function saveProfile() {
-    setSaved(true)
+  async function persistProfile() {
+    if (!profile?.id) return
+    setSaving(true)
     try {
       await supabase
         .from('profiles')
         .update({
           name: profile.name,
-          age: parseInt(profile.age),
+          age: parseInt(profile.age, 10),
           weight_kg: parseFloat(profile.weight_kg),
           height_cm: parseFloat(profile.height_cm),
           activity: profile.activity,
           goal: profile.goal,
           target_weight: parseFloat(profile.target_weight),
+          units: profile.units === 'imperial' ? 'imperial' : 'metric',
           updated_at: new Date().toISOString(),
         })
         .eq('id', profile.id)
       localStorage.setItem('profile', JSON.stringify(profile))
+      await refreshProfile()
       setSavedMsg(true)
       setTimeout(() => setSavedMsg(false), 2000)
     } catch (err) {
       console.error('Error saving:', err)
       alert('Failed to save.')
     } finally {
-      setSaved(false)
+      setSaving(false)
     }
   }
 
@@ -111,6 +114,7 @@ export default function Settings() {
       return [...prev, { date: today, weight_kg: weightKg }].sort((a, b) => a.date.localeCompare(b.date))
     })
     setWeightModalOpen(false)
+    refreshProfile().catch(() => {})
   }
 
   async function handleSelectTrainer(t) {
@@ -189,8 +193,12 @@ export default function Settings() {
 
   const update = (field, value) => setProfile((prev) => ({ ...prev, [field]: value }))
   const trainer = getTrainer(profile.trainer)
+  const massUnitLabel = profile.units === 'imperial' ? 'lbs' : 'kg'
   const startWeight = weightLogs[0]?.weight_kg ?? profile.weight_kg
-  const weightDiff = profile.weight_kg - startWeight
+  const curW = Number(profile.weight_kg)
+  const startW = Number(startWeight)
+  const weightDiff =
+    Number.isFinite(curW) && Number.isFinite(startW) ? curW - startW : NaN
 
   const inputStyle = {
     width: '100%',
@@ -259,48 +267,77 @@ export default function Settings() {
           <label style={{ fontSize: 11, color: '#2D5B3F', fontWeight: 600, marginBottom: 4, display: 'block' }}>Goal</label>
           <textarea value={profile.goal || ''} onChange={(e) => update('goal', e.target.value)} rows={3} style={{ ...inputStyle, resize: 'vertical', minHeight: 72 }} placeholder="e.g. Lose 8kg in 4 months, get a bigger chest with visible abs" />
         </div>
-        <button onClick={saveProfile} disabled={saved} style={{
+        <button type="button" onClick={persistProfile} disabled={saving} style={{
           width: '100%', padding: 16, borderRadius: 14, border: 'none',
           background: savedMsg ? 'rgba(110,231,183,0.15)' : 'linear-gradient(135deg, #10B981, #6EE7B7)',
           color: savedMsg ? '#6EE7B7' : '#070B07', fontSize: 15, fontWeight: 700,
           boxShadow: savedMsg ? 'none' : '0 4px 20px rgba(16,185,129,0.25)',
         }}>
-          {saved ? 'Saving...' : savedMsg ? '✓ Saved!' : 'Save Changes'}
+          {saving ? 'Saving...' : savedMsg ? '✓ Saved!' : 'Save Changes'}
         </button>
       </div>
 
       {/* Body Stats Section */}
       <div className="glass" style={{ padding: 20, marginBottom: 14, maxWidth: 400, marginLeft: 'auto', marginRight: 'auto' }}>
         <div style={{ fontSize: 16, fontWeight: 700, color: '#fff', marginBottom: 16 }}>Body Stats</div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-          <div>
-            <div style={{ fontSize: 11, color: '#2D5B3F', fontWeight: 600 }}>Current Weight</div>
-            <div style={{ fontSize: 24, fontWeight: 800, color: '#fff' }}>{profile.weight_kg} kg</div>
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+            <label style={{ fontSize: 11, color: '#2D5B3F', fontWeight: 600 }}>
+              Current weight (kg)
+              {profile.units === 'imperial' ? (
+                <span style={{ display: 'block', fontWeight: 500, color: '#1F4030', marginTop: 2 }}>
+                  Imperial preference: coach uses {massUnitLabel}; values here are stored in kg
+                </span>
+              ) : null}
+            </label>
+            <button type="button" onClick={() => setWeightModalOpen(true)} style={{
+              padding: '8px 16px', borderRadius: 10, border: '1px solid rgba(110,231,183,0.2)',
+              background: 'rgba(110,231,183,0.08)', color: '#6EE7B7', fontSize: 12, fontWeight: 600,
+            }}>
+              Log
+            </button>
           </div>
-          <button onClick={() => setWeightModalOpen(true)} style={{
-            padding: '8px 16px', borderRadius: 10, border: '1px solid rgba(110,231,183,0.2)',
-            background: 'rgba(110,231,183,0.08)', color: '#6EE7B7', fontSize: 12, fontWeight: 600,
-          }}>
-            Log
-          </button>
+          <input
+            type="number"
+            inputMode="decimal"
+            value={profile.weight_kg ?? ''}
+            onChange={(e) => update('weight_kg', e.target.value)}
+            style={inputStyle}
+          />
         </div>
         <div style={{ marginBottom: 12 }}>
-          <div style={{ fontSize: 11, color: '#2D5B3F', fontWeight: 600 }}>Target Weight</div>
-          <div style={{ fontSize: 18, fontWeight: 700, color: '#6EE7B7' }}>{profile.target_weight} kg</div>
+          <label style={{ fontSize: 11, color: '#2D5B3F', fontWeight: 600, marginBottom: 4, display: 'block' }}>
+            Target weight (kg)
+          </label>
+          <input
+            type="number"
+            inputMode="decimal"
+            value={profile.target_weight ?? ''}
+            onChange={(e) => update('target_weight', e.target.value)}
+            style={inputStyle}
+          />
         </div>
         <div style={{ marginBottom: 16 }}>
           <div style={{ fontSize: 11, color: '#2D5B3F', fontWeight: 600 }}>Change since start</div>
           <div style={{
             fontSize: 18,
             fontWeight: 700,
-            color: weightDiff > 0 ? '#6EE7B7' : weightDiff < 0 ? '#FB7185' : '#93C5FD',
+            color: !Number.isFinite(weightDiff) ? '#93C5FD' : weightDiff > 0 ? '#6EE7B7' : weightDiff < 0 ? '#FB7185' : '#93C5FD',
           }}>
-            {weightDiff >= 0 ? '+' : ''}{weightDiff.toFixed(1)} kg
+            {Number.isFinite(weightDiff) ? `${weightDiff >= 0 ? '+' : ''}${weightDiff.toFixed(1)} kg` : '—'}
           </div>
         </div>
         <div style={{ height: 60 }}>
-          <ProgressChart data={weightLogs} targetWeight={profile.target_weight} height={60} />
+          <ProgressChart data={weightLogs} targetWeight={parseFloat(profile.target_weight)} height={60} />
         </div>
+        <button type="button" onClick={persistProfile} disabled={saving} style={{
+          width: '100%', padding: 16, borderRadius: 14, border: 'none', marginTop: 12,
+          background: savedMsg ? 'rgba(110,231,183,0.15)' : 'linear-gradient(135deg, #10B981, #6EE7B7)',
+          color: savedMsg ? '#6EE7B7' : '#070B07', fontSize: 15, fontWeight: 700,
+          boxShadow: savedMsg ? 'none' : '0 4px 20px rgba(16,185,129,0.25)',
+        }}>
+          {saving ? 'Saving...' : savedMsg ? '✓ Saved!' : 'Save body stats'}
+        </button>
       </div>
 
       {/* Preferences Section */}
