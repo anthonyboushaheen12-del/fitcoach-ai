@@ -374,3 +374,9 @@ input:focus, textarea:focus, select:focus {
 .goal-result-card {
   -webkit-backface-visibility: visible;
 }
+
+@media (min-width: 480px) {
+  .trainer-modal-grid {
+    grid-template-columns: 1fr 1fr !important;
+  }
+}

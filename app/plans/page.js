@@ -44,6 +44,13 @@ const LABEL_MAP = {
   barbell_only: '🏋️ Barbell & Rack',
   dumbbells_only: '💪 Dumbbells Only',
   bodyweight: '🤸 Bodyweight',
+  rings: '🔗 Gymnastic rings',
+  handstand: '🤸 Handstand',
+  muscle_up: '💪 Muscle-up',
+  levers: '⚡ Front / Back lever',
+  planche: '🔥 Planche',
+  general_bodyweight: '🏋️ General bodyweight strength',
+  no_skills: '🎯 No specific skills — general fitness',
   '30-45': '⚡ 30-45 min',
   '45-60': '💪 45-60 min',
   '60-90': '🔥 60-90 min',
@@ -61,6 +68,14 @@ function formatWorkoutPrefLabel(value) {
 
 function hasActiveWorkoutPlan(planRows) {
   return (planRows || []).some((p) => p.type === 'workout' && p.active)
+}
+
+const BODYWEIGHT_SKILL_STEP_ID = 'bodyweightSkillGoals'
+
+/** Show bodyweight skill question when user has bodyweight, home gym, or rings. */
+function equipmentNeedsBodyweightSkillStep(equip) {
+  const a = Array.isArray(equip) ? equip : []
+  return a.includes('bodyweight') || a.includes('home_gym') || a.includes('rings')
 }
 
 const WORKOUT_STEPS = [
@@ -124,6 +139,20 @@ const WORKOUT_STEPS = [
       { value: 'barbell_only', label: 'Barbell & Rack Only', emoji: '🏋️' },
       { value: 'dumbbells_only', label: 'Dumbbells Only', emoji: '💪' },
       { value: 'bodyweight', label: 'Bodyweight Only', emoji: '🤸' },
+      { value: 'rings', label: 'Gymnastic rings', emoji: '🔗' },
+    ],
+    multi: true,
+  },
+  {
+    id: BODYWEIGHT_SKILL_STEP_ID,
+    q: 'What bodyweight skills are you working toward?',
+    options: [
+      { value: 'handstand', label: 'Handstand', emoji: '🤸' },
+      { value: 'muscle_up', label: 'Muscle-up', emoji: '💪' },
+      { value: 'levers', label: 'Front / Back lever', emoji: '⚡' },
+      { value: 'planche', label: 'Planche', emoji: '🔥' },
+      { value: 'general_bodyweight', label: 'General bodyweight strength (push-ups, pull-ups, dips)', emoji: '🏋️' },
+      { value: 'no_skills', label: 'No specific skills — just want to get fit with minimal equipment', emoji: '🎯' },
     ],
     multi: true,
   },
@@ -291,6 +320,17 @@ export default function Plans() {
     if (profile?.preferences?.meal) setMealPrefs(profile.preferences.meal)
   }, [profile?.preferences])
 
+  useEffect(() => {
+    if (view !== 'workout-quiz') return
+    if (workoutQuizStep < 2) return
+    const idx = workoutQuizStep - 2
+    if (idx < 0 || idx >= WORKOUT_STEPS.length) return
+    if (WORKOUT_STEPS[idx]?.id !== BODYWEIGHT_SKILL_STEP_ID) return
+    if (!equipmentNeedsBodyweightSkillStep(workoutPrefs.equipment)) {
+      setWorkoutQuizStep((s) => s + 1)
+    }
+  }, [view, workoutQuizStep, workoutPrefs.equipment])
+
   async function loadPlans(profileId) {
     if (!supabase) {
       setPlans([])
@@ -321,7 +361,52 @@ export default function Plans() {
   }
 
   const updateWorkoutPref = (key, value) => {
-    setWorkoutPrefs((p) => ({ ...p, [key]: value }))
+    setWorkoutPrefs((p) => {
+      let next = { ...p, [key]: value }
+      if (key === 'equipment') {
+        const arr = Array.isArray(value) ? value : []
+        if (!equipmentNeedsBodyweightSkillStep(arr)) {
+          next = { ...next, bodyweightSkillGoals: [] }
+        }
+      }
+      return next
+    })
+  }
+
+  function goWorkoutQuizBack() {
+    if (workoutQuizStep <= WORKOUT_QUIZ_BODY_STEP) {
+      setView('overview')
+      return
+    }
+    let s = workoutQuizStep - 1
+    while (s >= 2) {
+      const stepIdx = s - 2
+      if (stepIdx < 0) break
+      const st = WORKOUT_STEPS[stepIdx]
+      if (st?.id === BODYWEIGHT_SKILL_STEP_ID && !equipmentNeedsBodyweightSkillStep(workoutPrefs.equipment)) {
+        s -= 1
+        continue
+      }
+      break
+    }
+    setWorkoutQuizStep(Math.max(WORKOUT_QUIZ_BODY_STEP, s))
+  }
+
+  function goWorkoutQuizNext() {
+    setWorkoutQuizStep((prev) => {
+      let s = prev + 1
+      while (true) {
+        const stepIdx = s - 2
+        if (stepIdx < 0 || stepIdx >= WORKOUT_STEPS.length) break
+        const st = WORKOUT_STEPS[stepIdx]
+        if (st?.id === BODYWEIGHT_SKILL_STEP_ID && !equipmentNeedsBodyweightSkillStep(workoutPrefs.equipment)) {
+          s += 1
+          continue
+        }
+        break
+      }
+      return s
+    })
   }
   const updateMealPref = (key, value) => {
     setMealPrefs((p) => ({ ...p, [key]: value }))
@@ -820,16 +905,20 @@ export default function Plans() {
                 type="button"
                 onClick={() => setSelectedTrainerId(t.id)}
                 style={{
-                  padding: '8px 12px',
+                  padding: '8px 10px',
                   borderRadius: 999,
                   border: selectedTrainerId === t.id ? `2px solid ${t.color}` : '1px solid rgba(110,231,183,0.15)',
                   background: selectedTrainerId === t.id ? `${t.color}22` : 'rgba(14,20,14,0.5)',
                   color: selectedTrainerId === t.id ? t.color : '#D1FAE5',
-                  fontSize: 12,
+                  fontSize: 11,
                   fontWeight: 600,
+                  maxWidth: 160,
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
                 }}
               >
-                {t.emoji} {t.name.split(' ').slice(-2).join(' ')}
+                {t.id === 'calisthenics' ? `${t.emoji} Bodyweight` : `${t.emoji} ${t.name.split(' ').slice(-2).join(' ')}`}
               </button>
             ))}
           </div>
@@ -880,7 +969,7 @@ export default function Plans() {
         <div style={{ marginBottom: 20 }}>
           <button
             type="button"
-            onClick={() => (isFirst ? setView('overview') : setWorkoutQuizStep(workoutQuizStep - 1))}
+            onClick={goWorkoutQuizBack}
             style={{ background: 'none', border: 'none', color: '#6EE7B7', fontSize: 14, fontWeight: 600 }}
           >
             ← Back
@@ -1164,7 +1253,13 @@ export default function Plans() {
                   .filter(([k, v]) => v && (Array.isArray(v) ? v.length : true))
                   .map(([k, v]) => (
                     <span key={k} style={{ padding: '6px 12px', borderRadius: 20, background: 'rgba(110,231,183,0.15)', fontSize: 12, color: '#6EE7B7' }}>
-                      {k === 'currentTraining' ? 'Current training' : k === 'currentPhysique' ? 'Current physique' : formatWorkoutPrefLabel(v)}
+                      {k === 'currentTraining'
+                        ? 'Current training'
+                        : k === 'currentPhysique'
+                          ? 'Current physique'
+                          : k === 'bodyweightSkillGoals'
+                            ? `Skills: ${formatWorkoutPrefLabel(v)}`
+                            : formatWorkoutPrefLabel(v)}
                     </span>
                   ))}
                 {bodyGoalDescription?.trim() && (
@@ -1202,7 +1297,7 @@ export default function Plans() {
         ) : (
           <button
             type="button"
-            onClick={() => setWorkoutQuizStep(workoutQuizStep + 1)}
+            onClick={goWorkoutQuizNext}
             disabled={!canNext}
             style={{
               width: '100%',

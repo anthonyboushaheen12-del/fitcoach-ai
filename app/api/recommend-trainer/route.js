@@ -5,7 +5,7 @@ const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY || '',
 })
 
-const VALID_TRAINER_IDS = new Set(['scientist', 'sergeant', 'bro', 'holistic', 'athlete'])
+const VALID_TRAINER_IDS = new Set(['scientist', 'sergeant', 'bro', 'holistic', 'athlete', 'calisthenics'])
 
 const MAX_BASE64_CHARS = 6_000_000
 
@@ -87,13 +87,15 @@ USER PROFILE:
 ${bodyGoalDescription ? `PHYSIQUE GOAL DESCRIPTION: ${bodyGoalDescription}` : ''}
 ${bodyGoalImage ? 'A reference physique image has been provided above.' : 'No reference image provided.'}
 
-THE 5 AVAILABLE TRAINER PERSONAS:
+THE 6 AVAILABLE TRAINER PERSONAS:
 
 ${personaList}
 
+Prefer trainerId "calisthenics" when the user is bodyweight-first, uses rings, wants calisthenics skills (handstand, levers, planche, muscle-up), or has limited/no gym access.
+
 Respond ONLY with valid JSON, no markdown, no code fences:
 {
-  "trainerId": "one of: scientist, sergeant, bro, holistic, athlete",
+  "trainerId": "one of: scientist, sergeant, bro, holistic, athlete, calisthenics",
   "trainerName": "The display name from the list",
   "trainerEmoji": "the emoji",
   "reasoning": "2-3 sentences explaining WHY this trainer is the best match.",
@@ -132,13 +134,15 @@ CURRENT PHYSIQUE PHOTO ANALYSIS (AI):
 - Focus: ${bodyAnalysis.recommendedFocus || '—'}
 ` : ''}
 
-THE 5 AVAILABLE TRAINER PERSONAS:
+THE 6 AVAILABLE TRAINER PERSONAS:
 
 ${personaList}
 
+Prefer trainerId "calisthenics" when the user is bodyweight-first, uses rings, wants calisthenics skills (handstand, levers, planche, muscle-up), or has limited/no gym access.
+
 Respond ONLY with valid JSON, no markdown, no code fences:
 {
-  "trainerId": "one of: scientist, sergeant, bro, holistic, athlete",
+  "trainerId": "one of: scientist, sergeant, bro, holistic, athlete, calisthenics",
   "trainerName": "The display name from the list",
   "trainerEmoji": "the emoji",
   "reasoning": "2-3 sentences explaining WHY this trainer is the best match for this specific person, referencing goals, preferences, and physique inspiration if provided.",

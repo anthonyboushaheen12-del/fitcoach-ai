@@ -128,6 +128,27 @@ ${adjustmentsText}
         typeof wp.currentPhysique === 'string' && wp.currentPhysique.trim()
           ? wp.currentPhysique.trim()
           : 'Not specified.'
+      const equipArr = Array.isArray(wp.equipment) ? wp.equipment : []
+      const bodyweightMode =
+        equipArr.includes('bodyweight') ||
+        equipArr.includes('home_gym') ||
+        equipArr.includes('rings')
+      const skillGoalsArr = Array.isArray(wp.bodyweightSkillGoals) ? wp.bodyweightSkillGoals : []
+      const skillGoalsLine =
+        skillGoalsArr.length > 0
+          ? `\n- Bodyweight / calisthenics skill targets (from quiz): ${skillGoalsArr.join(', ')}`
+          : ''
+      const bodyweightRules = bodyweightMode
+        ? `
+
+CRITICAL — BODYWEIGHT / CALISTHENICS / RINGS MODE:
+- Program skill-appropriate progressions only. Respect the hierarchy (foundations before levers/planche/muscle-up). Never assign advanced skills (e.g. full planche, full front lever) to beginners or low experience levels.
+- Tendons and connective tissue adapt slower than muscle — do not rush stages; spell out progression timelines (e.g. tuck hold before straddle).
+- Core / "inner unit" work: cap dedicated ab compression and heavy skill-core work at 3-4 sessions per week maximum, not daily.
+- If rings are in their equipment, include ring progressions where appropriate (support holds, dips, rows, push-ups, levers as level allows) and leverage instability thoughtfully.
+- If they only have bodyweight / minimal equipment, do NOT default to dumbbell- or machine-heavy programs; prioritize bodyweight, bar work, and environment-friendly options.${skillGoalsLine}`
+        : `${skillGoalsLine}`
+
       const prefText = `
 Generate a complete workout plan for me based on my profile AND these specific preferences:${workoutActivityContext}
 
@@ -141,6 +162,7 @@ Generate a complete workout plan for me based on my profile AND these specific p
 - Injuries/Limitations: ${wp.injuries || 'None'}${bodyGoalLine}
 
 Use their CURRENT training and physique to avoid redundant work, respect what already works, and progress sensibly from where they are now.
+${bodyweightRules}
 `
       let bodyAnalysisBlock = ''
       if (bodyAnalysis && typeof bodyAnalysis === 'object') {

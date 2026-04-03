@@ -33,6 +33,10 @@ const GoalDashboardWidget = dynamic(() => import('../components/GoalDashboardWid
   ssr: false,
   loading: () => null,
 })
+const BodyweightSkillTracker = dynamic(() => import('../components/BodyweightSkillTracker'), {
+  ssr: false,
+  loading: () => null,
+})
 
 async function jsonHeadersWithAuth() {
   const headers = {}
@@ -1346,6 +1350,10 @@ export default function Dashboard() {
         profileWeightKg={profile?.weight_kg}
         cardDelay={(cardDelays[1] + 20) / 1000}
       />
+
+      {profile?.trainer === 'calisthenics' ? (
+        <BodyweightSkillTracker profileId={profile.id} cardDelay={(cardDelays[1] + 30) / 1000} />
+      ) : null}
 
       <motion.div
         initial={{ opacity: 0, y: 20 }}

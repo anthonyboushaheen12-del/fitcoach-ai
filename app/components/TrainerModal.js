@@ -70,7 +70,14 @@ export default function TrainerModal({ open, onClose, profile, currentTrainer, o
               ×
             </button>
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <div
+            className="trainer-modal-grid"
+            style={{
+              display: 'grid',
+              gridTemplateColumns: '1fr',
+              gap: 10,
+            }}
+          >
             {trainers.map((t) => (
               <button
                 key={t.id}
