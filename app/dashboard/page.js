@@ -29,6 +29,10 @@ const BodyFatLineChart = dynamic(
   () => import('../components/ProgressCharts').then((m) => m.BodyFatLineChart),
   { ssr: false, loading: () => null }
 )
+const GoalDashboardWidget = dynamic(() => import('../components/GoalDashboardWidget'), {
+  ssr: false,
+  loading: () => null,
+})
 
 async function jsonHeadersWithAuth() {
   const headers = {}
@@ -1336,6 +1340,12 @@ export default function Dashboard() {
           </div>
         </div>
       </motion.div>
+
+      <GoalDashboardWidget
+        profileId={profile?.id}
+        profileWeightKg={profile?.weight_kg}
+        cardDelay={(cardDelays[1] + 20) / 1000}
+      />
 
       <motion.div
         initial={{ opacity: 0, y: 20 }}

@@ -318,3 +318,59 @@ input:focus, textarea:focus, select:focus {
   margin: 0 auto;
   width: 100%;
 }
+
+/* Mobile: five bottom-nav tabs — hide labels on very narrow screens */
+@media (max-width: 380px) {
+  .bottom-nav-tab {
+    padding: 8px 6px !important;
+    min-width: 36px !important;
+  }
+  .bottom-nav-tab-icon {
+    font-size: 17px !important;
+  }
+  .bottom-nav-tab-label {
+    display: none;
+  }
+}
+
+/* Goal engine: milestone timeline */
+.goal-milestone-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.goal-milestone-item {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+}
+
+.goal-milestone-dot-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 14px;
+  flex-shrink: 0;
+}
+
+.goal-milestone-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #10B981, #6EE7B7);
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.2);
+  flex-shrink: 0;
+}
+
+.goal-milestone-line {
+  width: 2px;
+  flex: 1;
+  min-height: 28px;
+  margin-top: 4px;
+  border-radius: 1px;
+  background: linear-gradient(180deg, rgba(110, 231, 183, 0.5), rgba(110, 231, 183, 0));
+}
+
+.goal-result-card {
+  -webkit-backface-visibility: visible;
+}

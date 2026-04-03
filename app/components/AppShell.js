@@ -10,6 +10,7 @@ const TABS = [
   { id: '/dashboard', icon: '🏠', label: 'Home' },
   { id: '/chat', icon: '💬', label: 'Chat' },
   { id: '/plans', icon: '📋', label: 'Plans' },
+  { id: '/goals', icon: '🎯', label: 'Goals' },
   { id: '/settings', icon: '⚙️', label: 'Settings' },
 ]
 
@@ -233,11 +234,12 @@ function BottomNavTab({ tab, isActive, onClick }) {
       type="button"
       onClick={onClick}
       whileTap={{ scale: 0.92 }}
+      className="bottom-nav-tab"
       style={{
         background: 'none',
         border: 'none',
-        padding: '12px 20px',
-        minWidth: 44,
+        padding: '10px 12px',
+        minWidth: 40,
         minHeight: 44,
         display: 'flex',
         flexDirection: 'column',
@@ -249,8 +251,9 @@ function BottomNavTab({ tab, isActive, onClick }) {
     >
       <motion.div
         animate={isActive ? { scale: 1.05 } : { scale: 1 }}
+        className="bottom-nav-tab-icon"
         style={{
-          fontSize: 19,
+          fontSize: 18,
           filter: isActive ? 'none' : 'grayscale(1) opacity(0.25)',
           transition: 'all 0.2s ease',
         }}
@@ -258,8 +261,9 @@ function BottomNavTab({ tab, isActive, onClick }) {
         {tab.icon}
       </motion.div>
       <div
+        className="bottom-nav-tab-label"
         style={{
-          fontSize: 10,
+          fontSize: 9,
           fontWeight: 700,
           marginTop: 2,
           color: isActive ? '#6EE7B7' : '#1A3326',

@@ -22,6 +22,7 @@ function ChatContent() {
   const [imageBase64, setImageBase64] = useState(null)
   const messagesEndRef = useRef(null)
   const fileInputRef = useRef(null)
+  const prefillAppliedRef = useRef(false)
   const searchParams = useSearchParams()
 
   const trainer = profile ? getTrainer(profile.trainer) : getTrainer('bro')
@@ -40,6 +41,17 @@ function ChatContent() {
   useEffect(() => {
     if (searchParams.get('prompt') === 'body' && !input) {
       setInput('Can you assess my current physique? I\'ll upload a photo.')
+    }
+  }, [searchParams])
+
+  useEffect(() => {
+    const raw = searchParams.get('prefill')
+    if (!raw || prefillAppliedRef.current) return
+    prefillAppliedRef.current = true
+    try {
+      setInput(decodeURIComponent(raw))
+    } catch {
+      setInput(raw)
     }
   }, [searchParams])
 
