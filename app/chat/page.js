@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { motion } from 'framer-motion'
 import { supabase } from '../../lib/supabase'
 import { getTrainer } from '../../lib/trainers'
-import { useAuth } from '../components/AuthProvider'
+import { useAuth, readCachedProfileForUser } from '../components/AuthProvider'
 import BrandedAuthLoading from '../components/BrandedAuthLoading'
 import { useProfileResolutionTimeout } from '../hooks/useProfileResolutionTimeout'
 import TypingIndicator from '../components/TypingIndicator'
@@ -33,10 +33,13 @@ function ChatContent() {
       return
     }
     if (user && !profile && !profileLoading && !authLoading) {
+      if (readCachedProfileForUser(user.id)?.id) {
+        refreshProfile()
+        return
+      }
       router.push('/onboarding')
-      return
     }
-  }, [user, profile, profileLoading, authLoading, router])
+  }, [user, profile, profileLoading, authLoading, router, refreshProfile])
 
   useEffect(() => {
     if (searchParams.get('prompt') === 'body' && !input) {

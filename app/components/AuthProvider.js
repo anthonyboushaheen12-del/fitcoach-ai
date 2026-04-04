@@ -7,7 +7,7 @@ import BrandedAuthLoading from './BrandedAuthLoading'
 
 const AuthContext = createContext(null)
 
-function readCachedProfileForUser(userId) {
+export function readCachedProfileForUser(userId) {
   if (typeof window === 'undefined' || !userId) return null
   try {
     const raw = localStorage.getItem('profile')
@@ -29,7 +29,7 @@ export function AuthProvider({ children }) {
   const fetchProfile = useCallback(async (userId) => {
     if (!supabase || !userId) return null
     const timeout = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error('Profile fetch timeout')), 3000)
+      setTimeout(() => reject(new Error('Profile fetch timeout')), 10000)
     )
     try {
       const { data } = await Promise.race([
@@ -54,7 +54,7 @@ export function AuthProvider({ children }) {
       return
     }
 
-    const AUTH_INIT_MS = 3000
+    const AUTH_INIT_MS = 10000
     const race = (p, ms, label) =>
       Promise.race([
         p,
@@ -74,7 +74,7 @@ export function AuthProvider({ children }) {
         setLoading(false)
         setProfileLoading(false)
       }
-    }, 15000)
+    }, 25000)
 
     const initAuth = async () => {
       try {
@@ -111,6 +111,19 @@ export function AuthProvider({ children }) {
             u = sess?.session?.user ?? null
           } catch {
             u = null
+          }
+        }
+        if (!u) {
+          try {
+            const { data: sess2 } = await Promise.race([
+              supabase.auth.getSession(),
+              new Promise((_, reject) =>
+                setTimeout(() => reject(new Error('getSession final timeout')), 5000)
+              ),
+            ])
+            u = sess2?.session?.user ?? null
+          } catch {
+            // leave u null
           }
         }
         if (cancelled) return

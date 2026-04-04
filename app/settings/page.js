@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '../../lib/supabase'
 import { getTrainer } from '../../lib/trainers'
-import { useAuth } from '../components/AuthProvider'
+import { useAuth, readCachedProfileForUser } from '../components/AuthProvider'
 import BrandedAuthLoading from '../components/BrandedAuthLoading'
 import { useProfileResolutionTimeout } from '../hooks/useProfileResolutionTimeout'
 import WeightModal from '../components/WeightModal'
@@ -23,9 +23,18 @@ export default function Settings() {
   const [savedMsg, setSavedMsg] = useState(false)
 
   useEffect(() => {
-    if (!user) { router.push('/'); return }
-    if (user && !authProfile && !profileLoading && !authLoading) { router.push('/onboarding'); return }
-  }, [user, authProfile, profileLoading, authLoading, router])
+    if (!user) {
+      router.push('/')
+      return
+    }
+    if (user && !authProfile && !profileLoading && !authLoading) {
+      if (readCachedProfileForUser(user.id)?.id) {
+        refreshProfile()
+        return
+      }
+      router.push('/onboarding')
+    }
+  }, [user, authProfile, profileLoading, authLoading, router, refreshProfile])
 
   useEffect(() => {
     setProfile(authProfile)

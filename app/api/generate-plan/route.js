@@ -8,6 +8,12 @@ const anthropic = new Anthropic({
 
 const PROGRAM_ADJUSTMENTS_MAX = 2000
 
+/** Re-activate plan rows after a failed insert (user was not stranded with all rows inactive). */
+async function reactivatePlanIds(supabase, ids) {
+  if (!ids?.length) return
+  await supabase.from('plans').update({ active: true }).in('id', ids)
+}
+
 /** Free-form user instructions to change the program; empty if absent or invalid. */
 function normalizeProgramAdjustments(raw) {
   if (typeof raw !== 'string') return ''
@@ -104,6 +110,14 @@ ${adjustmentsText}
     let mealPlan = null
 
     if (doWorkout) {
+      const { data: prevWorkoutRows } = await supabase
+        .from('plans')
+        .select('id')
+        .eq('profile_id', profileId)
+        .eq('type', 'workout')
+        .eq('active', true)
+      const prevWorkoutPlanIds = (prevWorkoutRows || []).map((r) => r.id)
+
       const { error: offWErr } = await supabase
         .from('plans')
         .update({ active: false })
@@ -192,13 +206,15 @@ Use this analysis to prioritize exercises for weaker or lagging areas. If a musc
 
       const workoutPromptFull = prefText + bodyAnalysisBlock + adjustmentBlock
 
-      const workoutResponse = await anthropic.messages.create({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 2048,
-        system: systemPrompt + '\n\nIMPORTANT: You must respond ONLY with valid JSON. No text before or after. No markdown code fences.',
-        messages: [{
-          role: 'user',
-          content: workoutPromptFull + `
+      let workoutRowInserted = false
+      try {
+        const workoutResponse = await anthropic.messages.create({
+          model: 'claude-sonnet-4-20250514',
+          max_tokens: 2048,
+          system: systemPrompt + '\n\nIMPORTANT: You must respond ONLY with valid JSON. No text before or after. No markdown code fences.',
+          messages: [{
+            role: 'user',
+            content: workoutPromptFull + `
 Return ONLY a JSON object in this exact format:
 {
   "name": "Plan name (e.g. Upper/Lower Split)",
@@ -209,57 +225,71 @@ Return ONLY a JSON object in this exact format:
   "days": [{"name": "Day 1 - Upper Push", "exercises": [{"name": "Barbell Bench Press", "sets": "4x8-10", "rest": "90s"}]}]
 }
 Include all days with all exercises. Make todayExercises match the first day.`,
-        }],
-      })
+          }],
+        })
 
-      try {
-        const workoutText = workoutResponse.content[0].text.trim()
-        const clean = workoutText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
-        workoutPlan = JSON.parse(clean)
-      } catch (e) {
-        workoutPlan = {
-          name: 'Workout Plan',
-          daysPerWeek: wp.daysPerWeek || 4,
-          split: ['Mon: Day 1', 'Tue: Day 2', 'Thu: Day 3', 'Fri: Day 4'],
-          todayName: 'Full Body',
-          todayExercises: [
-            { name: 'Barbell Squat', sets: '4x8', rest: '120s' },
-            { name: 'Bench Press', sets: '4x8', rest: '90s' },
-            { name: 'Barbell Row', sets: '4x8', rest: '90s' },
-          ],
-          days: [],
+        try {
+          const workoutText = workoutResponse.content[0].text.trim()
+          const clean = workoutText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
+          workoutPlan = JSON.parse(clean)
+        } catch (e) {
+          workoutPlan = {
+            name: 'Workout Plan',
+            daysPerWeek: wp.daysPerWeek || 4,
+            split: ['Mon: Day 1', 'Tue: Day 2', 'Thu: Day 3', 'Fri: Day 4'],
+            todayName: 'Full Body',
+            todayExercises: [
+              { name: 'Barbell Squat', sets: '4x8', rest: '120s' },
+              { name: 'Bench Press', sets: '4x8', rest: '90s' },
+              { name: 'Barbell Row', sets: '4x8', rest: '90s' },
+            ],
+            days: [],
+          }
         }
-      }
 
-      const { error: insWErr } = await supabase.from('plans').insert({
-        profile_id: profileId,
-        type: 'workout',
-        content: workoutPlan,
-        trainer: trainerId || profile?.trainer,
-        active: true,
-      })
-      if (insWErr) {
-        return Response.json(
-          { success: false, error: 'Could not save workout plan', details: insWErr.message },
-          { status: 500 }
-        )
-      }
+        const { error: insWErr } = await supabase.from('plans').insert({
+          profile_id: profileId,
+          type: 'workout',
+          content: workoutPlan,
+          trainer: trainerId || profile?.trainer,
+          active: true,
+        })
+        if (insWErr) {
+          await reactivatePlanIds(supabase, prevWorkoutPlanIds)
+          return Response.json(
+            { success: false, error: 'Could not save workout plan', details: insWErr.message },
+            { status: 500 }
+          )
+        }
+        workoutRowInserted = true
 
-      const { error: prefWErr } = await supabase.from('profiles').update({
-        preferences: {
-          ...(profile?.preferences || {}),
-          workout: workoutPreferences,
-        },
-      }).eq('id', profileId)
-      if (prefWErr) {
-        return Response.json(
-          { success: false, error: 'Could not save workout preferences', details: prefWErr.message },
-          { status: 500 }
-        )
+        const { error: prefWErr } = await supabase.from('profiles').update({
+          preferences: {
+            ...(profile?.preferences || {}),
+            workout: workoutPreferences,
+          },
+        }).eq('id', profileId)
+        if (prefWErr) {
+          return Response.json(
+            { success: false, error: 'Could not save workout preferences', details: prefWErr.message },
+            { status: 500 }
+          )
+        }
+      } catch (workoutErr) {
+        if (!workoutRowInserted) await reactivatePlanIds(supabase, prevWorkoutPlanIds)
+        throw workoutErr
       }
     }
 
     if (doMeal) {
+      const { data: prevMealRows } = await supabase
+        .from('plans')
+        .select('id')
+        .eq('profile_id', profileId)
+        .eq('type', 'meal')
+        .eq('active', true)
+      const prevMealPlanIds = (prevMealRows || []).map((r) => r.id)
+
       const { error: offMErr } = await supabase
         .from('plans')
         .update({ active: false })
@@ -286,13 +316,15 @@ Generate a daily meal plan for me based on my profile AND these specific prefere
 - Budget: ${mp.budget || 'moderate'}${mealBodyGoal}
 `
 
-      const mealResponse = await anthropic.messages.create({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 2048,
-        system: systemPrompt + '\n\nIMPORTANT: You must respond ONLY with valid JSON. No text before or after. No markdown code fences.',
-        messages: [{
-          role: 'user',
-          content: prefText + adjustmentBlock + `
+      let mealRowInserted = false
+      try {
+        const mealResponse = await anthropic.messages.create({
+          model: 'claude-sonnet-4-20250514',
+          max_tokens: 2048,
+          system: systemPrompt + '\n\nIMPORTANT: You must respond ONLY with valid JSON. No text before or after. No markdown code fences.',
+          messages: [{
+            role: 'user',
+            content: prefText + adjustmentBlock + `
 Return ONLY a JSON object in this exact format:
 {
   "name": "Cut Meal Plan",
@@ -308,54 +340,60 @@ Return ONLY a JSON object in this exact format:
   ]
 }
 Calculate appropriate calories and macros. Keep meals simple and practical.`,
-        }],
-      })
+          }],
+        })
 
-      try {
-        const mealText = mealResponse.content[0].text.trim()
-        const clean = mealText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
-        mealPlan = JSON.parse(clean)
-      } catch (e) {
-        mealPlan = {
-          name: 'Meal Plan',
-          dailyCalories: '2,000 cal',
-          protein: '135g',
-          carbs: '220g',
-          fats: '67g',
-          meals: [
-            { name: 'Breakfast', description: 'Eggs + toast', calories: 500, protein: 30 },
-            { name: 'Lunch', description: 'Chicken + rice', calories: 600, protein: 40 },
-            { name: 'Snack', description: 'Yogurt + fruit', calories: 300, protein: 20 },
-            { name: 'Dinner', description: 'Fish + vegetables', calories: 600, protein: 35 },
-          ],
+        try {
+          const mealText = mealResponse.content[0].text.trim()
+          const clean = mealText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
+          mealPlan = JSON.parse(clean)
+        } catch (e) {
+          mealPlan = {
+            name: 'Meal Plan',
+            dailyCalories: '2,000 cal',
+            protein: '135g',
+            carbs: '220g',
+            fats: '67g',
+            meals: [
+              { name: 'Breakfast', description: 'Eggs + toast', calories: 500, protein: 30 },
+              { name: 'Lunch', description: 'Chicken + rice', calories: 600, protein: 40 },
+              { name: 'Snack', description: 'Yogurt + fruit', calories: 300, protein: 20 },
+              { name: 'Dinner', description: 'Fish + vegetables', calories: 600, protein: 35 },
+            ],
+          }
         }
-      }
 
-      const { error: insMErr } = await supabase.from('plans').insert({
-        profile_id: profileId,
-        type: 'meal',
-        content: mealPlan,
-        trainer: trainerId || profile?.trainer,
-        active: true,
-      })
-      if (insMErr) {
-        return Response.json(
-          { success: false, error: 'Could not save meal plan', details: insMErr.message },
-          { status: 500 }
-        )
-      }
+        const { error: insMErr } = await supabase.from('plans').insert({
+          profile_id: profileId,
+          type: 'meal',
+          content: mealPlan,
+          trainer: trainerId || profile?.trainer,
+          active: true,
+        })
+        if (insMErr) {
+          await reactivatePlanIds(supabase, prevMealPlanIds)
+          return Response.json(
+            { success: false, error: 'Could not save meal plan', details: insMErr.message },
+            { status: 500 }
+          )
+        }
+        mealRowInserted = true
 
-      const { error: prefMErr } = await supabase.from('profiles').update({
-        preferences: {
-          ...(profile?.preferences || {}),
-          meal: mealPreferences,
-        },
-      }).eq('id', profileId)
-      if (prefMErr) {
-        return Response.json(
-          { success: false, error: 'Could not save meal preferences', details: prefMErr.message },
-          { status: 500 }
-        )
+        const { error: prefMErr } = await supabase.from('profiles').update({
+          preferences: {
+            ...(profile?.preferences || {}),
+            meal: mealPreferences,
+          },
+        }).eq('id', profileId)
+        if (prefMErr) {
+          return Response.json(
+            { success: false, error: 'Could not save meal preferences', details: prefMErr.message },
+            { status: 500 }
+          )
+        }
+      } catch (mealErr) {
+        if (!mealRowInserted) await reactivatePlanIds(supabase, prevMealPlanIds)
+        throw mealErr
       }
     }
 

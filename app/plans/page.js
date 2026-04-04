@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { motion, AnimatePresence } from 'framer-motion'
 import { supabase } from '../../lib/supabase'
 import { getTrainer, trainers as trainersList } from '../../lib/trainers'
-import { useAuth } from '../components/AuthProvider'
+import { useAuth, readCachedProfileForUser } from '../components/AuthProvider'
 import BrandedAuthLoading from '../components/BrandedAuthLoading'
 import { useProfileResolutionTimeout } from '../hooks/useProfileResolutionTimeout'
 import ExerciseRow from '../components/ExerciseRow'
@@ -283,9 +283,18 @@ export default function Plans() {
   const workoutEditFromQueryRef = useRef(false)
 
   useEffect(() => {
-    if (!user) { router.push('/'); return }
-    if (user && !profile && !profileLoading && !authLoading) { router.push('/onboarding'); return }
-  }, [user, profile, profileLoading, authLoading, router])
+    if (!user) {
+      router.push('/')
+      return
+    }
+    if (user && !profile && !profileLoading && !authLoading) {
+      if (readCachedProfileForUser(user.id)?.id) {
+        refreshProfile()
+        return
+      }
+      router.push('/onboarding')
+    }
+  }, [user, profile, profileLoading, authLoading, router, refreshProfile])
 
   useEffect(() => {
     const start = searchParams.get('start')
@@ -337,23 +346,32 @@ export default function Plans() {
       setLoading(false)
       return
     }
-    const q = supabase
-      .from('plans')
-      .select('*')
-      .eq('profile_id', profileId)
-      .order('created_at', { ascending: false })
-    let data = null
-    try {
-      const res = await Promise.race([
-        q,
-        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 3000)),
+    const TIMEOUT_MS = 10000
+    const fetchRows = () =>
+      Promise.race([
+        supabase
+          .from('plans')
+          .select('*')
+          .eq('profile_id', profileId)
+          .order('created_at', { ascending: false }),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), TIMEOUT_MS)),
       ])
-      data = res?.data ?? null
-    } catch {
-      data = null
+
+    try {
+      const res = await fetchRows()
+      if (res?.error) throw new Error(res.error.message || 'plans error')
+      setPlans(res?.data ?? [])
+    } catch (firstErr) {
+      try {
+        const res = await fetchRows()
+        if (res?.error) throw new Error(res.error.message || 'plans error')
+        setPlans(res?.data ?? [])
+      } catch {
+        setPlans((prev) => (Array.isArray(prev) && prev.length ? prev : []))
+      }
+    } finally {
+      setLoading(false)
     }
-    setPlans(data || [])
-    setLoading(false)
   }
 
   function toggleExercise(dayIdx, exIdx) {

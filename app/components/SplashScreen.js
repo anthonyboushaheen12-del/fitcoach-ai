@@ -3,6 +3,14 @@
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 
+function hasLikelySupabaseSession() {
+  try {
+    return Object.keys(localStorage).some((k) => /^sb-.+-auth-token$/.test(k))
+  } catch {
+    return false
+  }
+}
+
 export default function SplashScreen({ onComplete }) {
   const [visible, setVisible] = useState(false) // Start false, set true after mount check
   const [progress, setProgress] = useState(0)
@@ -11,12 +19,14 @@ export default function SplashScreen({ onComplete }) {
     if (typeof window === 'undefined') return
     setVisible(true)
 
-    const duration = 2500
+    const returning = hasLikelySupabaseSession()
+    const duration = returning ? 700 : 2500
+    const progressMs = returning ? 550 : 2000
     const interval = 20
     let elapsed = 0
     const timer = setInterval(() => {
       elapsed += interval
-      setProgress(Math.min((elapsed / 2000) * 100, 100))
+      setProgress(Math.min((elapsed / progressMs) * 100, 100))
       if (elapsed >= duration) {
         clearInterval(timer)
         setVisible(false)

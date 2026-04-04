@@ -3,8 +3,8 @@
 import { useEffect, useRef } from 'react'
 import { useAuth } from './AuthProvider'
 
-/** Must exceed worst-case init (getUser + getSession + profile fetch races ~9s) so we never open the shell with user still null. */
-const SAFETY_MS = 14000
+/** Must exceed worst-case init (10s auth race + 10s profile fetch + retries) before forcing the shell open. */
+const SAFETY_MS = 26000
 
 /** Belt-and-suspenders: forces auth gate open if loading stays true too long. */
 export default function AuthLoadingSafetyNet() {

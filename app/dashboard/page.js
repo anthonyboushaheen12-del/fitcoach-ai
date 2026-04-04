@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation'
 import { motion } from 'framer-motion'
 import { supabase } from '../../lib/supabase'
 import { getTrainer } from '../../lib/trainers'
-import { useAuth } from '../components/AuthProvider'
+import { useAuth, readCachedProfileForUser } from '../components/AuthProvider'
 import BrandedAuthLoading from '../components/BrandedAuthLoading'
 import { useProfileResolutionTimeout } from '../hooks/useProfileResolutionTimeout'
 import ExerciseRow from '../components/ExerciseRow'
@@ -269,10 +269,13 @@ export default function Dashboard() {
       return
     }
     if (user && !authProfile && !profileLoading && !authLoading) {
+      if (readCachedProfileForUser(user.id)?.id) {
+        refreshProfile()
+        return
+      }
       router.push('/onboarding')
-      return
     }
-  }, [user, authProfile, profileLoading, authLoading, router])
+  }, [user, authProfile, profileLoading, authLoading, router, refreshProfile])
 
   const missingProfileId = Boolean(profile) && !profile?.id
 
@@ -420,42 +423,64 @@ export default function Dashboard() {
         return
       }
 
-      const TIMEOUT_MS = 3000
-      const queries = Promise.all([
-        supabase
-          .from('plans')
-          .select('id, profile_id, type, content, active, created_at')
-          .eq('profile_id', profileId)
-          .eq('active', true),
-        supabase
-          .from('weight_logs')
-          .select('weight_kg, logged_at, created_at, profile_id')
-          .eq('profile_id', profileId)
-          .order('created_at', { ascending: true })
-          .limit(60),
-      ])
-      const timeout = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('Dashboard data load timed out')), TIMEOUT_MS)
-      )
+      const TIMEOUT_MS = 10000
 
-      const [plansResult, logsResult] = await Promise.race([queries, timeout])
+      const runQueries = () =>
+        Promise.all([
+          supabase
+            .from('plans')
+            .select('id, profile_id, type, content, active, created_at')
+            .eq('profile_id', profileId)
+            .eq('active', true),
+          supabase
+            .from('weight_logs')
+            .select('weight_kg, logged_at, created_at, profile_id')
+            .eq('profile_id', profileId)
+            .order('created_at', { ascending: true })
+            .limit(60),
+        ])
 
-      const plansData = plansResult?.data
-      const logs = logsResult?.data
+      const loadOnce = async () => {
+        const [plansResult, logsResult] = await Promise.race([
+          runQueries(),
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('Dashboard data load timed out')), TIMEOUT_MS)
+          ),
+        ])
+        if (plansResult?.error) throw new Error(plansResult.error.message || 'plans query failed')
+        if (logsResult?.error) throw new Error(logsResult.error.message || 'weight_logs query failed')
+        return { plansData: plansResult?.data, logs: logsResult?.data }
+      }
+
+      let plansData
+      let logs
+      try {
+        ;({ plansData, logs } = await loadOnce())
+      } catch (firstErr) {
+        console.warn('Dashboard data load retrying after:', firstErr?.message)
+        try {
+          ;({ plansData, logs } = await loadOnce())
+        } catch (err) {
+          console.error('Dashboard plans/weight load failed:', err)
+          setPlans((prev) => prev)
+          setWeightLogs((prev) => (prev?.length ? prev : buildWeightLogsFromProfile(profileRow, null)))
+          return
+        }
+      }
 
       if (plansData) {
         const workout = plansData.find((p) => p.type === 'workout')
         const meal = plansData.find((p) => p.type === 'meal')
         setPlans({ workout, meal })
       } else {
-        setPlans({ workout: null, meal: null })
+        setPlans((prev) => prev)
       }
 
       setWeightLogs(buildWeightLogsFromProfile(profileRow, logs))
     } catch (err) {
       console.error('Dashboard plans/weight load failed:', err)
-      setPlans({ workout: null, meal: null })
-      setWeightLogs(buildWeightLogsFromProfile(profileRow, null))
+      setPlans((prev) => prev)
+      setWeightLogs((prev) => (prev?.length ? prev : buildWeightLogsFromProfile(profileRow, null)))
     } finally {
       setLoading(false)
     }
@@ -940,15 +965,30 @@ export default function Dashboard() {
               Progress pics help your coach see what the scale won&apos;t show.
             </div>
           </div>
-          <div className="glass" style={{ padding: 16, borderTop: '3px solid #93C5FD' }}>
+          <button
+            type="button"
+            className="glass"
+            onClick={() => setWeightModalOpen(true)}
+            style={{
+              padding: 16,
+              borderTop: '3px solid #93C5FD',
+              textAlign: 'left',
+              cursor: 'pointer',
+              borderLeft: 'none',
+              borderRight: 'none',
+              borderBottom: 'none',
+              width: '100%',
+              fontFamily: 'inherit',
+            }}
+          >
             <div style={{ fontSize: 10, color: '#2D5B3F', fontWeight: 600 }}>WEIGHT</div>
             <div style={{ fontSize: 22, fontWeight: 800, color: '#fff', marginTop: 4 }}>
               {profile?.weight_kg != null ? `${profile.weight_kg} kg` : '—'}
             </div>
             <div style={{ fontSize: 11, color: '#4A6B58', marginTop: 6, lineHeight: 1.4 }}>
-              Log weight on the full dashboard once your plan is live.
+              Tap to log or update your weight anytime.
             </div>
-          </div>
+          </button>
         </div>
 
         <div
@@ -1034,7 +1074,7 @@ export default function Dashboard() {
           <div style={{ padding: '32px 24px', textAlign: 'center' }}>
             <div style={{ fontSize: 48, marginBottom: 12 }}>🎯</div>
             <h2 style={{ fontSize: 22, fontWeight: 800, color: '#fff', marginBottom: 8 }}>
-              Welcome to FitCoach AI
+              Pick up your program
             </h2>
             <p
               style={{
@@ -1046,7 +1086,7 @@ export default function Dashboard() {
                 margin: '0 auto 24px',
               }}
             >
-              Let&apos;s build your personalized training program. Answer a few questions and we&apos;ll match you with the perfect AI coach.
+              You&apos;re signed in — generate or refresh a workout plan anytime. Your coach will use the preferences you already saved.
             </p>
             <button
               type="button"
@@ -1067,7 +1107,23 @@ export default function Dashboard() {
                 cursor: 'pointer',
               }}
             >
-              Create My Program →
+              Open Plans &amp; generate →
+            </button>
+            <button
+              type="button"
+              onClick={() => router.push('/settings')}
+              style={{
+                marginTop: 12,
+                background: 'transparent',
+                border: 'none',
+                color: '#6B8F7A',
+                fontSize: 13,
+                fontWeight: 600,
+                cursor: 'pointer',
+                textDecoration: 'underline',
+              }}
+            >
+              Profile &amp; settings
             </button>
           </div>
         </div>
@@ -1100,6 +1156,12 @@ export default function Dashboard() {
           onClose={() => setWorkoutLogModalOpen(false)}
           profileId={profile?.id}
           onLog={handleWorkoutLogged}
+        />
+        <WeightModal
+          open={weightModalOpen}
+          onClose={() => setWeightModalOpen(false)}
+          profile={profile}
+          onSave={handleLogWeight}
         />
       </div>
     )

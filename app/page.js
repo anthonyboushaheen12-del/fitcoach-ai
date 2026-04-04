@@ -3,13 +3,13 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { motion } from 'framer-motion'
-import { useAuth } from './components/AuthProvider'
+import { useAuth, readCachedProfileForUser } from './components/AuthProvider'
 import BrandedAuthLoading from './components/BrandedAuthLoading'
 import { supabase } from '../lib/supabase'
 
 export default function AuthPage() {
   const router = useRouter()
-  const { user, profile, loading: authLoading, profileLoading, signIn, signUp, signOut } = useAuth()
+  const { user, profile, loading: authLoading, profileLoading, signIn, signUp, signOut, refreshProfile } = useAuth()
   const [tab, setTab] = useState('signin')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -27,12 +27,20 @@ export default function AuthPage() {
     else if (t === 'signin') setTab('signin')
   }, [])
 
+  useEffect(() => {
+    if (!user || profile || authLoading || profileLoading) return
+    if (readCachedProfileForUser(user.id)?.id) refreshProfile()
+  }, [user, profile, authLoading, profileLoading, refreshProfile])
+
   // Wait for auth + profile resolution — do not show sign-in until both are settled (avoids fake "signed out" flash).
   if (authLoading || profileLoading) {
     return <BrandedAuthLoading />
   }
 
   if (user && !profile) {
+    if (readCachedProfileForUser(user.id)?.id) {
+      return <BrandedAuthLoading />
+    }
     router.replace('/onboarding')
     return null
   }

@@ -6,7 +6,7 @@ import { motion } from 'framer-motion'
 import { supabase } from '../../lib/supabase'
 import { getTrainer } from '../../lib/trainers'
 import { applyGoalToPlans } from '../../lib/apply-goal-to-plans'
-import { useAuth } from '../components/AuthProvider'
+import { useAuth, readCachedProfileForUser } from '../components/AuthProvider'
 import BrandedAuthLoading from '../components/BrandedAuthLoading'
 import { useProfileResolutionTimeout } from '../hooks/useProfileResolutionTimeout'
 import GoalResults from '../components/GoalResults'
@@ -44,7 +44,7 @@ const LOADING_FACTS = [
 
 function GoalsContent() {
   const router = useRouter()
-  const { user, profile, profileLoading, loading: authLoading } = useAuth()
+  const { user, profile, profileLoading, loading: authLoading, refreshProfile } = useAuth()
   const profileResolutionTimedOut = useProfileResolutionTimeout(user, profile, 3000)
 
   const [goalInput, setGoalInput] = useState('')
@@ -63,9 +63,13 @@ function GoalsContent() {
   useEffect(() => {
     if (!user) router.push('/')
     else if (user && !profile && !profileLoading && !authLoading && profileResolutionTimedOut) {
+      if (readCachedProfileForUser(user.id)?.id) {
+        refreshProfile()
+        return
+      }
       router.push('/onboarding')
     }
-  }, [user, profile, profileLoading, authLoading, profileResolutionTimedOut, router])
+  }, [user, profile, profileLoading, authLoading, profileResolutionTimedOut, router, refreshProfile])
 
   useEffect(() => {
     if (!loading) return
