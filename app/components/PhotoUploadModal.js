@@ -55,7 +55,7 @@ export default function PhotoUploadModal({ isOpen, onClose, profile, onSaved }) 
           const ar = await fetch('/api/analyze-body', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ image: base64, mediaType: 'image/jpeg', profile }),
+            body: JSON.stringify({ image: base64, mediaType: 'image/jpeg', profile, photoType }),
           })
           const analysisPayload = await ar.json().catch(() => ({}))
           const analysis = analysisPayload.analysis || analysisPayload
@@ -206,7 +206,8 @@ export default function PhotoUploadModal({ isOpen, onClose, profile, onSaved }) 
           }}
         />
         <div style={{ fontSize: 12, color: '#5BA37A', marginBottom: 10, lineHeight: 1.4 }}>
-          Select one or more photos (same angle type applies to all in this batch).
+          Choose the angle that matches the shot — <strong style={{ color: '#6EE7B7' }}>Back</strong> for rear poses
+          so lats and upper back are analyzed. The same type applies to every photo in this batch.
         </div>
         <input
           ref={inputRef}

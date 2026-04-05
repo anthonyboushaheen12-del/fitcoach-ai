@@ -1,5 +1,6 @@
 'use client'
 
+import { mergeCheckInAnalysisFromPhotos } from '../../lib/merge-checkin-analysis'
 import ProgressMuscleAssessment from './ProgressMuscleAssessment'
 
 export default function ProgressTimeline({ photos, onAdd, onSelectPhoto }) {
@@ -29,11 +30,13 @@ export default function ProgressTimeline({ photos, onAdd, onSelectPhoto }) {
   }
 
   const latest = photos.length > 0 ? photos[photos.length - 1] : null
-  const latestAnalysis = latest?.analysis && typeof latest.analysis === 'object' ? latest.analysis : null
+  const merged = mergeCheckInAnalysisFromPhotos(photos)
+  const displayAnalysis = merged?.analysis || (latest?.analysis && typeof latest.analysis === 'object' ? latest.analysis : null)
+  const mergeHint = merged?.mergeHint ?? null
   const showLatestMuscle =
-    latestAnalysis &&
-    latestAnalysis.muscleAssessment &&
-    typeof latestAnalysis.muscleAssessment === 'object'
+    displayAnalysis &&
+    displayAnalysis.muscleAssessment &&
+    typeof displayAnalysis.muscleAssessment === 'object'
 
   return (
     <div>
@@ -115,12 +118,47 @@ export default function ProgressTimeline({ photos, onAdd, onSelectPhoto }) {
       >
         <div style={{ fontSize: 12, fontWeight: 700, color: '#fff', marginBottom: 4 }}>Latest check-in</div>
         <div style={{ fontSize: 10, color: '#4A6B58', marginBottom: 10, lineHeight: 1.35 }}>
-          Part-by-part snapshot from your most recent photo
+          Built from your newest photo plus other recent angles when a muscle group wasn&apos;t visible in the latest shot
           {latest?.created_at
-            ? ` · ${new Date(latest.created_at).toLocaleDateString('en', { month: 'short', day: 'numeric' })}`
+            ? ` · newest: ${new Date(latest.created_at).toLocaleDateString('en', { month: 'short', day: 'numeric' })}`
             : ''}
         </div>
-        <ProgressMuscleAssessment analysis={latestAnalysis} compact />
+        {mergeHint ? (
+          <div style={{ fontSize: 10, color: '#5BA37A', marginBottom: 10, lineHeight: 1.4 }}>{mergeHint}</div>
+        ) : null}
+        <ProgressMuscleAssessment analysis={displayAnalysis} compact />
+        {displayAnalysis?.recommendedFocus && typeof displayAnalysis.recommendedFocus === 'string' ? (
+          <div
+            style={{
+              marginTop: 12,
+              paddingTop: 12,
+              borderTop: '1px solid rgba(110,231,183,0.1)',
+            }}
+          >
+            <div style={{ fontSize: 10, fontWeight: 700, color: '#2D5B3F', marginBottom: 4 }}>COACH FOCUS</div>
+            <div style={{ fontSize: 11, color: '#A7C4B8', lineHeight: 1.45 }}>{displayAnalysis.recommendedFocus}</div>
+          </div>
+        ) : null}
+        {Array.isArray(displayAnalysis?.strengths) && displayAnalysis.strengths.length > 0 ? (
+          <div style={{ marginTop: 10 }}>
+            <div style={{ fontSize: 10, fontWeight: 700, color: '#2D5B3F', marginBottom: 4 }}>STRENGTHS</div>
+            <ul style={{ margin: 0, paddingLeft: 18, fontSize: 11, color: '#8BAFA0', lineHeight: 1.45 }}>
+              {displayAnalysis.strengths.slice(0, 4).map((s, i) => (
+                <li key={i}>{typeof s === 'string' ? s : String(s)}</li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+        {Array.isArray(displayAnalysis?.areasToImprove) && displayAnalysis.areasToImprove.length > 0 ? (
+          <div style={{ marginTop: 10 }}>
+            <div style={{ fontSize: 10, fontWeight: 700, color: '#2D5B3F', marginBottom: 4 }}>ROOM TO GROW</div>
+            <ul style={{ margin: 0, paddingLeft: 18, fontSize: 11, color: '#8BAFA0', lineHeight: 1.45 }}>
+              {displayAnalysis.areasToImprove.slice(0, 4).map((s, i) => (
+                <li key={i}>{typeof s === 'string' ? s : String(s)}</li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
       </div>
     )}
     <div

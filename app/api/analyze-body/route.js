@@ -18,6 +18,14 @@ const FALLBACK_ANALYSIS = {
     back: 'not visible',
     legs: 'not visible',
   },
+  muscleNotes: {
+    shoulders: '',
+    chest: '',
+    arms: '',
+    core: '',
+    back: '',
+    legs: '',
+  },
   recommendedFocus:
     'We could not analyze the photo. Continue with your other answers — your trainer will still personalize your program.',
   estimatedTrainingAge: 'beginner',
@@ -27,7 +35,13 @@ const FALLBACK_ANALYSIS = {
 export async function POST(request) {
   try {
     const body = await request.json()
-    const { image, mediaType = 'image/jpeg', profile } = body
+    const { image, mediaType = 'image/jpeg', profile, photoType = 'front' } = body
+    const angle =
+      photoType === 'back'
+        ? 'BACK view (posterior): prioritize lats, upper/mid/low back, rear delts, glutes/hamstrings if visible. Mark chest as not visible if only the back is shown.'
+        : photoType === 'side'
+          ? 'SIDE / three-quarter view: note proportions depth-wise; assess shoulders, chest thickness, posture, glutes if visible.'
+          : 'FRONT view: prioritize chest, front delts, arms, abs/core, quads if visible. Mark back as not visible if the back is not shown.'
 
     if (!image || typeof image !== 'string') {
       return Response.json({ error: 'No image provided', analysis: FALLBACK_ANALYSIS }, { status: 200 })
@@ -41,7 +55,7 @@ export async function POST(request) {
 
     const response = await anthropic.messages.create({
       model: 'claude-sonnet-4-20250514',
-      max_tokens: 1024,
+      max_tokens: 1536,
       messages: [
         {
           role: 'user',
@@ -56,7 +70,10 @@ export async function POST(request) {
             },
             {
               type: 'text',
-              text: `You are an expert fitness coach and body composition analyst. Analyze this physique photo and provide a detailed but concise assessment. Be honest but constructive — never insulting or discouraging. Use approximate body fat RANGES (e.g. "18-22%"), never claim exact measurement. If a body part is not visible in the photo, use "not visible" in muscleAssessment rather than guessing.
+              text: `You are an expert fitness coach and body composition analyst. Analyze this physique photo and provide a detailed but constructive assessment. Be honest — never insulting. Use approximate body fat RANGES (e.g. "18-22%"), never claim exact measurement. If a body part is truly not in frame, use "not visible" in muscleAssessment rather than guessing.
+
+PHOTO ANGLE (follow strictly):
+${angle}
 
 USER CONTEXT:
 - Age: ${profile?.age ?? 'Unknown'}
@@ -70,19 +87,27 @@ Respond ONLY with valid JSON, no markdown, no code fences:
   "bodyFatEstimate": "X-Y%",
   "buildType": "one of: Ectomorph, Mesomorph, Endomorph, Ecto-Meso, Meso-Endo",
   "overallRating": "X/10",
-  "strengths": ["strength 1", "strength 2", "strength 3"],
-  "areasToImprove": ["area 1", "area 2", "area 3"],
+  "strengths": ["4-5 specific, observable positives from THIS photo"],
+  "areasToImprove": ["3-5 specific areas with brief why (e.g. chest thickness, lat width)"],
   "muscleAssessment": {
-    "shoulders": "underdeveloped / average / well-developed / not visible",
-    "chest": "underdeveloped / average / well-developed / not visible",
-    "arms": "underdeveloped / average / well-developed / not visible",
-    "core": "underdeveloped / average / well-developed / not visible",
-    "back": "underdeveloped / average / well-developed / not visible",
-    "legs": "underdeveloped / average / well-developed / not visible"
+    "shoulders": "one of: underdeveloped, average, well-developed, not visible — use ONLY these tokens",
+    "chest": "same",
+    "arms": "same",
+    "core": "same",
+    "back": "same",
+    "legs": "same"
   },
-  "recommendedFocus": "2-3 sentences on training approach",
+  "muscleNotes": {
+    "shoulders": "One sentence: e.g. capped delts vs needs rear emphasis — empty string if not visible",
+    "chest": "one sentence or empty string",
+    "arms": "one sentence or empty string",
+    "core": "one sentence or empty string",
+    "back": "one sentence on lats/traps/lower back if visible, else empty string",
+    "legs": "one sentence on quads/hams/glutes if visible, else empty string"
+  },
+  "recommendedFocus": "3-4 sentences: priorities, exercise styles, frequency hints",
   "estimatedTrainingAge": "beginner / intermediate / advanced",
-  "postureNotes": "visible postural issues or posture looks good / not visible"
+  "postureNotes": "2-3 sentences on posture, shoulder alignment, pelvic tilt if visible, else not visible"
 }`,
             },
           ],
@@ -98,6 +123,17 @@ Respond ONLY with valid JSON, no markdown, no code fences:
     } catch (parseErr) {
       throw parseErr
     }
+
+    const partKeys = ['shoulders', 'chest', 'arms', 'core', 'back', 'legs']
+    if (!analysis.muscleNotes || typeof analysis.muscleNotes !== 'object') {
+      analysis.muscleNotes = {}
+    }
+    for (const k of partKeys) {
+      const v = analysis.muscleNotes[k]
+      if (typeof v !== 'string' || !v.trim()) analysis.muscleNotes[k] = ''
+      else analysis.muscleNotes[k] = v.trim()
+    }
+
     return Response.json({ analysis })
   } catch (err) {
     console.error('Body analysis error:', err)

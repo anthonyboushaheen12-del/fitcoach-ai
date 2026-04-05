@@ -477,6 +477,7 @@ export default function Plans() {
           image: base64,
           mediaType,
           profile,
+          photoType: 'front',
         }),
       })
       const data = await res.json().catch(() => ({}))
