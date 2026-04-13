@@ -1,6 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { getTrainer, buildSystemPrompt, buildOnboardingContextPrompt } from '../../../lib/trainers'
 import { createSupabaseRouteClient } from '../../../lib/supabase-api-route'
+import { computeNutritionTargets } from '../../../lib/nutrition-targets'
 
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY || '',
@@ -18,6 +19,43 @@ async function reactivatePlanIds(supabase, ids) {
 function normalizeProgramAdjustments(raw) {
   if (typeof raw !== 'string') return ''
   return raw.trim().slice(0, PROGRAM_ADJUSTMENTS_MAX)
+}
+
+function normalizeClientNutritionTargets(raw) {
+  if (!raw || typeof raw !== 'object') return null
+  const c = Number(raw.calories)
+  const p = Number(raw.proteinG ?? raw.protein)
+  const carb = Number(raw.carbsG ?? raw.carbs)
+  const f = Number(raw.fatsG ?? raw.fats)
+  if (![c, p, carb, f].every((n) => Number.isFinite(n) && n > 0)) return null
+  return {
+    calories: Math.round(c),
+    proteinG: Math.round(p),
+    carbsG: Math.round(carb),
+    fatsG: Math.round(f),
+    note: typeof raw.note === 'string' ? raw.note : null,
+  }
+}
+
+function formatNutritionBlock(targets) {
+  if (!targets) return ''
+  const note = targets.note ? `\n- Note: ${targets.note}` : ''
+  return `
+NUTRITION TARGETS (align daily totals closely to these — adjust meal sizes and food choices):
+- Calories: ~${targets.calories} kcal/day
+- Protein: ~${targets.proteinG} g/day
+- Carbs: ~${targets.carbsG} g/day
+- Fats: ~${targets.fatsG} g/day${note}
+`
+}
+
+function summarizeWorkoutForMeals(content) {
+  if (!content || typeof content !== 'object') return ''
+  const name = typeof content.name === 'string' ? content.name : 'Workout program'
+  const d = content.daysPerWeek
+  const days = Number.isFinite(Number(d)) ? `${d} days/week` : 'training plan'
+  const split = Array.isArray(content.split) ? content.split.slice(0, 4).join('; ') : ''
+  return `- Program: ${name} (${days})${split ? `\n- Split: ${split}` : ''}`
 }
 
 export async function POST(request) {
@@ -43,6 +81,10 @@ export async function POST(request) {
       mealPreferences = {},
       bodyAnalysis = null,
       programAdjustments = null,
+      nutritionTargets: clientNutritionTargets = null,
+      pantryDescription = '',
+      eatingToday = '',
+      workoutContentContext = null,
     } = body
 
     if (!profileId) {
@@ -282,6 +324,49 @@ Include all days with all exercises. Make todayExercises match the first day.`,
     }
 
     if (doMeal) {
+      let workoutCtx = null
+      if (doWorkout && workoutPlan) {
+        workoutCtx = workoutPlan
+      } else if (workoutContentContext && typeof workoutContentContext === 'object') {
+        workoutCtx = workoutContentContext
+      } else {
+        const { data: wActive, error: wActiveErr } = await supabase
+          .from('plans')
+          .select('content')
+          .eq('profile_id', profileId)
+          .eq('type', 'workout')
+          .eq('active', true)
+          .limit(1)
+        if (wActiveErr || !wActive?.[0]?.content) {
+          return Response.json(
+            {
+              success: false,
+              error: 'Workout plan required',
+              details:
+                'Create an active workout plan before generating meals, or generate workout and meals in one request.',
+            },
+            { status: 400 }
+          )
+        }
+        workoutCtx = wActive[0].content
+      }
+
+      const targets =
+        normalizeClientNutritionTargets(clientNutritionTargets) ||
+        computeNutritionTargets(profile, workoutCtx)
+
+      const nutritionBlock = formatNutritionBlock(targets)
+      const workoutAlign = summarizeWorkoutForMeals(workoutCtx)
+      const pantrySlice =
+        typeof pantryDescription === 'string' ? pantryDescription.trim().slice(0, 2000) : ''
+      const eatingSlice = typeof eatingToday === 'string' ? eatingToday.trim().slice(0, 1500) : ''
+      const pantryText = pantrySlice
+        ? `\n\nPANTRY / WHAT I HAVE ON HAND (prefer these ingredients when practical):\n${pantrySlice}`
+        : ''
+      const eatingText = eatingSlice
+        ? `\n\nWHAT I AM EATING TODAY (context only — still build a full day plan unless they ask otherwise):\n${eatingSlice}`
+        : ''
+
       const { data: prevMealRows } = await supabase
         .from('plans')
         .select('id')
@@ -306,8 +391,12 @@ Include all days with all exercises. Make todayExercises match the first day.`,
       const mealBodyGoal = mp.bodyGoalDescription
         ? `\n- User physique / aesthetic goal context: ${mp.bodyGoalDescription}`
         : ''
+      const trainingAlignText = workoutAlign
+        ? `\n\nTRAINING CONTEXT (fuel to match this workload):\n${workoutAlign}`
+        : ''
       const prefText = `
 Generate a daily meal plan for me based on my profile AND these specific preferences:${mealActivityContext}
+${nutritionBlock}${trainingAlignText}${pantryText}${eatingText}
 
 - Dietary Preference: ${mp.diet || 'no restrictions'}
 - Meals Per Day: ${mp.mealsPerDay || 4}
@@ -379,10 +468,16 @@ Calculate appropriate calories and macros. Keep meals simple and practical.`,
         }
         mealRowInserted = true
 
+        const mealPrefsPersist = {
+          ...mealPreferences,
+          ...(pantrySlice ? { pantryDescription: pantrySlice } : {}),
+          ...(eatingSlice ? { eatingToday: eatingSlice } : {}),
+          lastNutritionTargets: targets,
+        }
         const { error: prefMErr } = await supabase.from('profiles').update({
           preferences: {
             ...(profile?.preferences || {}),
-            meal: mealPreferences,
+            meal: mealPrefsPersist,
           },
         }).eq('id', profileId)
         if (prefMErr) {

@@ -2,6 +2,8 @@
 
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
+import { supabase } from '../../lib/supabase'
+import { compressImageForUpload } from '../../lib/image-compress'
 
 const MEAL_TYPES = [
   { id: 'breakfast', label: 'Breakfast', emoji: '🍳' },
@@ -10,6 +12,36 @@ const MEAL_TYPES = [
   { id: 'dinner', label: 'Dinner', emoji: '🥩' },
   { id: 'other', label: 'Other', emoji: '🥛' },
 ]
+
+async function authJsonHeaders() {
+  const headers = { 'Content-Type': 'application/json' }
+  if (supabase) {
+    const { data: { session } } = await supabase.auth.getSession()
+    if (session?.access_token) headers.Authorization = `Bearer ${session.access_token}`
+  }
+  return headers
+}
+
+function foodItemFromMealAnalysis(it) {
+  const g = Math.max(1, Math.round(Number(it.grams) || 100))
+  const cal = Number(it.calories) || 0
+  const p = Number(it.protein) || 0
+  const cb = Number(it.carbs) || 0
+  const f = Number(it.fats) || 0
+  const scale = 100 / g
+  return {
+    name: String(it.name || 'Food').slice(0, 120),
+    brand: '',
+    image: null,
+    servingSize: `${g}g (photo est.)`,
+    per100g: {
+      calories: cal * scale,
+      protein: p * scale,
+      carbs: cb * scale,
+      fats: f * scale,
+    },
+  }
+}
 
 function useDebounce(value, delay) {
   const [debouncedValue, setDebouncedValue] = useState(value)
@@ -28,8 +60,17 @@ export default function FoodLogModal({ open, onClose, profileId, onLog }) {
   const [selected, setSelected] = useState([])
   const [quickAddOpen, setQuickAddOpen] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [photoBusy, setPhotoBusy] = useState(false)
+  const [photoHint, setPhotoHint] = useState(null)
 
   const debouncedSearch = useDebounce(search, 300)
+
+  useEffect(() => {
+    if (!open) {
+      setPhotoBusy(false)
+      setPhotoHint(null)
+    }
+  }, [open])
 
   useEffect(() => {
     if (!debouncedSearch?.trim()) {
@@ -60,6 +101,42 @@ export default function FoodLogModal({ open, onClose, profileId, onLog }) {
     const g = parseFloat(grams) || 0
     if (g <= 0) return
     setSelected((prev) => prev.map((s, i) => (i === index ? { ...s, grams: g } : s)))
+  }
+
+  async function handleMealPhotoChange(e) {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file || !profileId || !file.type.startsWith('image/')) return
+    setPhotoBusy(true)
+    setPhotoHint(null)
+    try {
+      const { base64, mediaType } = await compressImageForUpload(file)
+      const res = await fetch('/api/analyze-meal', {
+        method: 'POST',
+        headers: await authJsonHeaders(),
+        body: JSON.stringify({ profileId, image: base64, mediaType }),
+      })
+      const data = await res.json().catch(() => ({}))
+      const a = data.analysis || data
+      const items = Array.isArray(a?.items) ? a.items : []
+      for (const it of items) {
+        const g = Math.max(1, Math.round(Number(it.grams) || 100))
+        addFood(foodItemFromMealAnalysis(it), g)
+      }
+      if (items.length === 0) {
+        setPhotoHint(typeof a?.notes === 'string' ? a.notes : 'No foods detected — try a clearer photo.')
+      } else {
+        setPhotoHint(
+          a?.mealLabel
+            ? `${a.mealLabel} · estimates only`
+            : 'Added from photo (estimates — adjust grams if needed).'
+        )
+      }
+    } catch {
+      setPhotoHint('Could not analyze photo.')
+    } finally {
+      setPhotoBusy(false)
+    }
   }
 
   function addQuick(manual) {
@@ -201,6 +278,34 @@ export default function FoodLogModal({ open, onClose, profileId, onLog }) {
               </button>
             ))}
           </div>
+
+          <label
+            style={{
+              display: 'block',
+              marginBottom: 12,
+              padding: '12px 16px',
+              borderRadius: 14,
+              border: '1px dashed rgba(110,231,183,0.35)',
+              background: 'rgba(110,231,183,0.06)',
+              cursor: photoBusy ? 'wait' : 'pointer',
+              textAlign: 'center',
+              fontSize: 13,
+              fontWeight: 600,
+              color: photoBusy ? '#2D5B3F' : '#6EE7B7',
+            }}
+          >
+            <input
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              style={{ display: 'none' }}
+              disabled={photoBusy}
+              onChange={handleMealPhotoChange}
+            />
+            {photoBusy ? 'Analyzing plate photo...' : 'Scan meal from photo'}
+          </label>
+          {photoHint && (
+            <div style={{ fontSize: 12, color: '#A7C4B8', marginBottom: 12, lineHeight: 1.45 }}>{photoHint}</div>
+          )}
 
           <div
             style={{

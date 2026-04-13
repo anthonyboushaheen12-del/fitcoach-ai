@@ -17,6 +17,19 @@ export default function SplashScreen({ onComplete }) {
 
   useEffect(() => {
     if (typeof window === 'undefined') return
+
+    try {
+      const nav = performance.getEntriesByType?.('navigation')?.[0]
+      const isReload = nav?.type === 'reload'
+      if (!isReload && hasLikelySupabaseSession()) {
+        setVisible(false)
+        onComplete?.()
+        return
+      }
+    } catch {
+      /* ignore */
+    }
+
     setVisible(true)
 
     const returning = hasLikelySupabaseSession()

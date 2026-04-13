@@ -1,26 +1,47 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 
+const LB_PER_KG = 2.2046226218
+
+function displayWeightFromKg(kg, imperial) {
+  if (kg == null || Number.isNaN(Number(kg))) return ''
+  if (imperial) {
+    const lbs = Number(kg) * LB_PER_KG
+    const rounded = Math.round(lbs * 10) / 10
+    return String(rounded)
+  }
+  return String(kg)
+}
+
+function kgFromInput(num, imperial) {
+  if (imperial) return num / LB_PER_KG
+  return num
+}
+
 export default function WeightModal({ open, onClose, profile, onSave }) {
-  const [value, setValue] = useState(profile?.weight_kg?.toString() || '')
-  const [saving, setSaving] = useState(false)
+  const [value, setValue] = useState('')
   const units = profile?.units === 'imperial' ? 'imperial' : 'metric'
   const label = units === 'imperial' ? 'lbs' : 'kg'
 
-  async function handleSave() {
+  useEffect(() => {
+    if (!open || !profile) return
+    setValue(displayWeightFromKg(profile.weight_kg, units === 'imperial'))
+  }, [open, profile?.id, profile?.weight_kg, profile?.units, units])
+
+  function handleSave() {
     const num = parseFloat(value)
     if (isNaN(num) || num <= 0) return
-    setSaving(true)
-    try {
-      await onSave(num)
-      onClose()
-    } catch (err) {
-      console.error(err)
-    } finally {
-      setSaving(false)
-    }
+    const kg = kgFromInput(num, units === 'imperial')
+    onClose()
+    void (async () => {
+      try {
+        await onSave(kg)
+      } catch (err) {
+        console.error(err)
+      }
+    })()
   }
 
   if (!open) return null
@@ -47,7 +68,7 @@ export default function WeightModal({ open, onClose, profile, onSave }) {
           initial={{ y: '100%' }}
           animate={{ y: 0 }}
           exit={{ y: '100%' }}
-          transition={{ type: 'spring', damping: 28, stiffness: 300 }}
+          transition={{ type: 'tween', duration: 0.2, ease: 'easeOut' }}
           onClick={(e) => e.stopPropagation()}
           className="glass"
           style={{
@@ -103,7 +124,7 @@ export default function WeightModal({ open, onClose, profile, onSave }) {
             </button>
             <button
               onClick={handleSave}
-              disabled={saving || !value}
+              disabled={!value}
               style={{
                 flex: 2,
                 padding: 16,
@@ -114,10 +135,10 @@ export default function WeightModal({ open, onClose, profile, onSave }) {
                 fontSize: 15,
                 fontWeight: 700,
                 boxShadow: '0 4px 20px rgba(16,185,129,0.25)',
-                opacity: saving || !value ? 0.6 : 1,
+                opacity: !value ? 0.6 : 1,
               }}
             >
-              {saving ? 'Saving...' : 'Save'}
+              Save
             </button>
           </div>
         </motion.div>

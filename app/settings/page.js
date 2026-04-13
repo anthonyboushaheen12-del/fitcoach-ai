@@ -122,7 +122,6 @@ export default function Settings() {
       }
       return [...prev, { date: today, weight_kg: weightKg }].sort((a, b) => a.date.localeCompare(b.date))
     })
-    setWeightModalOpen(false)
     refreshProfile().catch(() => {})
   }
 
@@ -135,7 +134,7 @@ export default function Settings() {
   }
 
   async function resetAccount() {
-    if (!confirm('This will delete ALL your data (profile, plans, chat history). Are you sure?')) return
+    if (!confirm('This will delete ALL your data (profile, plans, logs). Are you sure?')) return
     if (!confirm('Really sure? This cannot be undone.')) return
     await supabase.from('chat_messages').delete().eq('profile_id', profile.id)
     await supabase.from('plans').delete().eq('profile_id', profile.id)
@@ -402,27 +401,9 @@ export default function Settings() {
         }}>
           Export My Data
         </button>
-        <button onClick={() => {
-          if (confirm('Clear all chat history?')) {
-            supabase.from('chat_messages').delete().eq('profile_id', profile.id).then(() => alert('Chat cleared.'))
-          }
-        }} style={{
-          width: '100%', padding: 14, borderRadius: 12, marginBottom: 10,
-          border: '1px solid rgba(110,231,183,0.15)', background: 'transparent', color: '#6EE7B7',
-          fontSize: 14, fontWeight: 600, textAlign: 'left',
-        }}>
-          Clear Chat History
-        </button>
         <button onClick={signOut} style={{
           width: '100%', padding: 14, borderRadius: 12, marginBottom: 10,
           border: '1px solid rgba(249,115,22,0.3)', background: 'rgba(249,115,22,0.08)', color: '#F97316',
-          fontSize: 14, fontWeight: 600, textAlign: 'left',
-        }}>
-          Sign Out
-        </button>
-        <button onClick={async () => { await signOut() }} style={{
-          width: '100%', padding: 14, borderRadius: 12, marginBottom: 10,
-          border: '1px solid rgba(110,231,183,0.25)', background: 'transparent', color: '#6EE7B7',
           fontSize: 14, fontWeight: 600, textAlign: 'left',
         }}>
           Sign Out

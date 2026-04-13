@@ -8,7 +8,6 @@ import { useAuth } from './AuthProvider'
 const SIDEBAR_W = 220
 const TABS = [
   { id: '/dashboard', icon: '🏠', label: 'Home' },
-  { id: '/chat', icon: '💬', label: 'Chat' },
   { id: '/plans', icon: '📋', label: 'Plans' },
   { id: '/goals', icon: '🎯', label: 'Goals' },
   { id: '/settings', icon: '⚙️', label: 'Settings' },
@@ -17,7 +16,7 @@ const TABS = [
 export default function AppShell({ children }) {
   const pathname = usePathname()
   const router = useRouter()
-  const { user, profile, signOut } = useAuth()
+  const { user, profile, signOut, loading: authLoading } = useAuth()
   const [isDesktop, setIsDesktop] = useState(false)
 
   useEffect(() => {
@@ -27,6 +26,12 @@ export default function AppShell({ children }) {
     mq.addEventListener('change', set)
     return () => mq.removeEventListener('change', set)
   }, [])
+
+  useEffect(() => {
+    if (authLoading || !user) return
+    router.prefetch('/dashboard')
+    router.prefetch('/plans')
+  }, [authLoading, user, router])
 
   const hideNav = pathname === '/' || pathname === '/onboarding'
   const isOnboarding = hideNav

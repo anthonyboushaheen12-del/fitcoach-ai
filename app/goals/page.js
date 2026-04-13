@@ -155,7 +155,7 @@ function GoalsContent() {
   function handleDiscuss() {
     const g = goalInput.trim() || plan?.goalSummary?.objective || 'reach my goal'
     const msg = `I just set a goal to ${g}. Can you help me understand the plan and stay accountable?`
-    router.push(`/chat?prefill=${encodeURIComponent(msg)}`)
+    router.push(`/plans?coach=1&seed=${encodeURIComponent(msg)}`)
   }
 
   async function handleShare() {

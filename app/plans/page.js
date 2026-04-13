@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { motion, AnimatePresence } from 'framer-motion'
+import useSWR from 'swr'
 import { supabase } from '../../lib/supabase'
 import { getTrainer, trainers as trainersList } from '../../lib/trainers'
 import { useAuth, readCachedProfileForUser } from '../components/AuthProvider'
@@ -11,6 +12,8 @@ import { useProfileResolutionTimeout } from '../hooks/useProfileResolutionTimeou
 import ExerciseRow from '../components/ExerciseRow'
 import WorkoutMuscleMap from '../components/WorkoutMuscleMap'
 import { compressImageForUpload } from '../../lib/image-compress'
+import PlanCoachPanel from '../components/PlanCoachPanel'
+import { computeNutritionTargets } from '../../lib/nutrition-targets'
 
 async function jsonHeadersWithAuth() {
   const headers = { 'Content-Type': 'application/json' }
@@ -66,8 +69,15 @@ function formatWorkoutPrefLabel(value) {
   return LABEL_MAP[value] ?? String(value)
 }
 
-function hasActiveWorkoutPlan(planRows) {
-  return (planRows || []).some((p) => p.type === 'workout' && p.active)
+/** Active workout row has real program content (meal generation depends on training load). */
+function hasUsableWorkoutForMeals(planRows) {
+  const row = (planRows || []).find((p) => p.type === 'workout' && p.active)
+  const c = row?.content
+  if (!c || typeof c !== 'object') return false
+  if (Array.isArray(c.days) && c.days.length > 0) return true
+  if (Array.isArray(c.todayExercises) && c.todayExercises.length > 0) return true
+  if (typeof c.name === 'string' && c.name.trim().length > 0) return true
+  return false
 }
 
 const BODYWEIGHT_SKILL_STEP_ID = 'bodyweightSkillGoals'
@@ -250,8 +260,31 @@ export default function Plans() {
   const searchParams = useSearchParams()
   const { user, profile, refreshProfile, profileLoading, loading: authLoading } = useAuth()
   const profileResolutionTimedOut = useProfileResolutionTimeout(user, profile, 3000)
-  const [plans, setPlans] = useState([])
-  const [loading, setLoading] = useState(true)
+  const plansSwrKey = profile?.id ? ['plans-all', profile.id] : null
+  const {
+    data: plans = [],
+    mutate: mutatePlans,
+    isLoading: plansSwrLoading,
+    error: plansSwrError,
+  } = useSWR(
+    plansSwrKey,
+    async ([, profileId]) => {
+      if (!supabase) return []
+      const res = await Promise.race([
+        supabase
+          .from('plans')
+          .select('*')
+          .eq('profile_id', profileId)
+          .order('created_at', { ascending: false }),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 10000)),
+      ])
+      if (res?.error) throw new Error(res.error.message || 'plans error')
+      return res?.data ?? []
+    },
+    { keepPreviousData: true, revalidateOnFocus: true }
+  )
+  const [pantryDescription, setPantryDescription] = useState('')
+  const [eatingToday, setEatingToday] = useState('')
   const [view, setView] = useState('overview')
   const [subView, setSubView] = useState('today')
   const [expandedDay, setExpandedDay] = useState(null)
@@ -320,9 +353,10 @@ export default function Plans() {
   }, [searchParams, plans])
 
   useEffect(() => {
-    if (!profile?.id) return
-    loadPlans(profile.id)
-  }, [profile?.id])
+    const m = profile?.preferences?.meal
+    if (typeof m?.pantryDescription === 'string') setPantryDescription(m.pantryDescription)
+    if (typeof m?.eatingToday === 'string') setEatingToday(m.eatingToday)
+  }, [profile?.id, profile?.preferences?.meal?.pantryDescription, profile?.preferences?.meal?.eatingToday])
 
   useEffect(() => {
     if (profile?.preferences?.workout) setWorkoutPrefs(profile.preferences.workout)
@@ -341,37 +375,8 @@ export default function Plans() {
   }, [view, workoutQuizStep, workoutPrefs.equipment])
 
   async function loadPlans(profileId) {
-    if (!supabase) {
-      setPlans([])
-      setLoading(false)
-      return
-    }
-    const TIMEOUT_MS = 10000
-    const fetchRows = () =>
-      Promise.race([
-        supabase
-          .from('plans')
-          .select('*')
-          .eq('profile_id', profileId)
-          .order('created_at', { ascending: false }),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), TIMEOUT_MS)),
-      ])
-
-    try {
-      const res = await fetchRows()
-      if (res?.error) throw new Error(res.error.message || 'plans error')
-      setPlans(res?.data ?? [])
-    } catch (firstErr) {
-      try {
-        const res = await fetchRows()
-        if (res?.error) throw new Error(res.error.message || 'plans error')
-        setPlans(res?.data ?? [])
-      } catch {
-        setPlans((prev) => (Array.isArray(prev) && prev.length ? prev : []))
-      }
-    } finally {
-      setLoading(false)
-    }
+    if (!profileId || profileId !== profile?.id) return
+    await mutatePlans()
   }
 
   function toggleExercise(dayIdx, exIdx) {
@@ -616,6 +621,8 @@ export default function Plans() {
 
   async function runGenerateMealApi(trainerId) {
     if (!profile) return
+    const activeW = plans.find((p) => p.type === 'workout' && p.active)
+    const nutritionTargets = computeNutritionTargets(profile, activeW?.content ?? null)
     const mealPreferences = {
       ...mealPrefs,
       bodyGoalDescription: bodyGoalDescription?.trim() || undefined,
@@ -630,6 +637,10 @@ export default function Plans() {
         onboardingContext: profile?.onboarding_context,
         type: 'meal',
         mealPreferences,
+        nutritionTargets,
+        pantryDescription: pantryDescription.trim() || undefined,
+        eatingToday: eatingToday.trim() || undefined,
+        workoutContentContext: activeW?.content ?? undefined,
       }),
     })
     const data = await res.json().catch(() => ({}))
@@ -655,6 +666,10 @@ export default function Plans() {
       await refreshProfile()
       const tid = selectedTrainerId
       if (pendingGenerateType === 'meal') {
+        if (!hasUsableWorkoutForMeals(plans)) {
+          setGenError('Create a workout plan first — nutrition is matched to your training.')
+          return
+        }
         await runGenerateMealApi(tid)
       } else {
         await runGenerateWorkoutApi(tid)
@@ -673,19 +688,19 @@ export default function Plans() {
 
   async function onMealQuizGenerateClick() {
     if (!profile) return
-    if (hasActiveWorkoutPlan(plans)) {
-      setGenerating(true)
-      setGenError(null)
-      try {
-        await runGenerateMealApi(profile.trainer || 'bro')
-      } catch (err) {
-        setGenError(err?.message || 'Failed to generate meal plan')
-      } finally {
-        setGenerating(false)
-      }
+    if (!hasUsableWorkoutForMeals(plans)) {
+      setGenError('Create a workout plan first — your meal targets use training volume from that program.')
       return
     }
-    await fetchTrainerRecommendation(true)
+    setGenerating(true)
+    setGenError(null)
+    try {
+      await runGenerateMealApi(profile.trainer || 'bro')
+    } catch (err) {
+      setGenError(err?.message || 'Failed to generate meal plan')
+    } finally {
+      setGenerating(false)
+    }
   }
 
   const showProfileStuckError =
@@ -695,7 +710,10 @@ export default function Plans() {
     (profileLoading || authLoading)
 
   const showPlansGateLoading =
-    (loading || !profile) &&
+    (!profile ||
+      authLoading ||
+      profileLoading ||
+      (Boolean(plansSwrKey) && plansSwrLoading && plans.length === 0 && !plansSwrError)) &&
     !showProfileStuckError
 
   if (showProfileStuckError) {
@@ -745,6 +763,7 @@ export default function Plans() {
   const trainer = getTrainer(profile.trainer)
   const activeWorkout = plans.find((p) => p.type === 'workout' && p.active)
   const activeMeal = plans.find((p) => p.type === 'meal' && p.active)
+  const macroTargetsPreview = computeNutritionTargets(profile, activeWorkout?.content ?? null)
 
   const todayIdx = new Date().getDay()
   const todayStr = DAY_NAMES[todayIdx]
@@ -1427,9 +1446,9 @@ export default function Plans() {
           <div style={{ marginTop: 24 }}>
             <div className="glass" style={{ padding: 16, marginBottom: 16 }}>
               <div style={{ fontSize: 14, color: '#F97316', marginBottom: 8 }}>
-                {hasActiveWorkoutPlan(plans)
+                {hasUsableWorkoutForMeals(plans)
                   ? `${trainer.name} will design your nutrition`
-                  : 'We may match a coach first, then design your nutrition'}
+                  : 'You need an active workout plan first'}
               </div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                 {Object.entries(mealPrefs).filter(([k, v]) => v && (Array.isArray(v) ? v.length : true)).map(([k, v]) => (
@@ -1439,11 +1458,35 @@ export default function Plans() {
                 ))}
               </div>
             </div>
+            {hasUsableWorkoutForMeals(plans) && (
+              <>
+                <label style={{ fontSize: 12, color: '#2D5B3F', fontWeight: 600, display: 'block', marginBottom: 6 }}>
+                  Pantry / ingredients on hand
+                </label>
+                <textarea
+                  value={pantryDescription}
+                  onChange={(e) => setPantryDescription(e.target.value)}
+                  placeholder="Helps your coach use what you already have"
+                  rows={2}
+                  style={{ ...inputStyle, marginBottom: 12, fontSize: 13 }}
+                />
+                <label style={{ fontSize: 12, color: '#2D5B3F', fontWeight: 600, display: 'block', marginBottom: 6 }}>
+                  Eating today (optional)
+                </label>
+                <textarea
+                  value={eatingToday}
+                  onChange={(e) => setEatingToday(e.target.value)}
+                  placeholder="Context for one-off meals or events"
+                  rows={2}
+                  style={{ ...inputStyle, marginBottom: 16, fontSize: 13 }}
+                />
+              </>
+            )}
             {genError && <div style={{ color: '#FB7185', fontSize: 13, marginBottom: 12 }}>{genError}</div>}
             <button
               type="button"
               onClick={onMealQuizGenerateClick}
-              disabled={generating || recommendLoading}
+              disabled={generating || recommendLoading || !hasUsableWorkoutForMeals(plans)}
               style={{
                 width: '100%',
                 padding: 16,
@@ -1453,7 +1496,7 @@ export default function Plans() {
                 color: '#fff',
                 fontSize: 15,
                 fontWeight: 700,
-                opacity: generating || recommendLoading ? 0.6 : 1,
+                opacity: generating || recommendLoading || !hasUsableWorkoutForMeals(plans) ? 0.6 : 1,
               }}
             >
               {generating ? `${trainer.emoji} Designing your nutrition...` : 'Generate My Meal Plan'}
@@ -1493,6 +1536,88 @@ export default function Plans() {
         </h1>
         <p style={{ fontSize: 12, color: '#2D5B3F', fontWeight: 500, marginTop: 3 }}>Your plans</p>
       </div>
+
+      <PlanCoachPanel
+        profile={profile}
+        activeWorkoutContent={activeWorkout?.content ?? null}
+        activeMealContent={activeMeal?.content ?? null}
+        workoutPrefs={workoutPrefs}
+        mealPrefs={mealPrefs}
+        bodyGoalDescription={bodyGoalDescription}
+        bodyAnalysis={bodyAnalysis}
+        defaultOpen={searchParams.get('coach') === '1'}
+        seedMessage={searchParams.get('seed') ? decodeURIComponent(searchParams.get('seed')) : null}
+        onRefreshPlans={async () => {
+          await Promise.all([loadPlans(profile.id), refreshProfile()])
+        }}
+      />
+
+      {hasUsableWorkoutForMeals(plans) && (
+        <div
+          className="glass"
+          style={{
+            padding: 16,
+            marginBottom: 20,
+            border: '1px solid rgba(249,115,22,0.18)',
+            background: 'linear-gradient(145deg, rgba(249,115,22,0.06), rgba(14,20,14,0.75))',
+          }}
+        >
+          <div style={{ fontSize: 13, fontWeight: 700, color: '#FB923C', marginBottom: 8 }}>Nutrition targets</div>
+          <p style={{ fontSize: 12, color: '#2D5B3F', margin: '0 0 12px', lineHeight: 1.45 }}>
+            Estimated from your profile and training volume. Your coach uses these when building meals.
+          </p>
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(2, 1fr)',
+              gap: 10,
+              marginBottom: 14,
+              fontSize: 13,
+              color: '#E2FBE8',
+            }}
+          >
+            <div>
+              <span style={{ color: '#2D5B3F', fontSize: 11 }}>Calories</span>
+              <div style={{ fontWeight: 700 }}>~{macroTargetsPreview.calories}</div>
+            </div>
+            <div>
+              <span style={{ color: '#2D5B3F', fontSize: 11 }}>Protein</span>
+              <div style={{ fontWeight: 700 }}>~{macroTargetsPreview.proteinG} g</div>
+            </div>
+            <div>
+              <span style={{ color: '#2D5B3F', fontSize: 11 }}>Carbs</span>
+              <div style={{ fontWeight: 700 }}>~{macroTargetsPreview.carbsG} g</div>
+            </div>
+            <div>
+              <span style={{ color: '#2D5B3F', fontSize: 11 }}>Fats</span>
+              <div style={{ fontWeight: 700 }}>~{macroTargetsPreview.fatsG} g</div>
+            </div>
+          </div>
+          {macroTargetsPreview.note && (
+            <p style={{ fontSize: 11, color: '#A7C4B8', margin: '0 0 12px' }}>{macroTargetsPreview.note}</p>
+          )}
+          <label style={{ fontSize: 11, color: '#2D5B3F', fontWeight: 600, display: 'block', marginBottom: 6 }}>
+            Pantry / what you have on hand
+          </label>
+          <textarea
+            value={pantryDescription}
+            onChange={(e) => setPantryDescription(e.target.value)}
+            placeholder="e.g. Chicken breast, rice, eggs, frozen veg, Greek yogurt…"
+            rows={2}
+            style={{ ...inputStyle, marginBottom: 12, fontSize: 13 }}
+          />
+          <label style={{ fontSize: 11, color: '#2D5B3F', fontWeight: 600, display: 'block', marginBottom: 6 }}>
+            What you&apos;re eating today (optional)
+          </label>
+          <textarea
+            value={eatingToday}
+            onChange={(e) => setEatingToday(e.target.value)}
+            placeholder="e.g. Team lunch — keep dinner lighter on carbs"
+            rows={2}
+            style={{ ...inputStyle, fontSize: 13 }}
+          />
+        </div>
+      )}
 
       {activeWorkout ? (
         <div style={{ marginBottom: 20 }}>
@@ -1701,16 +1826,24 @@ export default function Plans() {
         <div className="glass" style={{ padding: 24, textAlign: 'center', border: '1px dashed rgba(249,115,22,0.2)' }}>
           <div style={{ fontSize: 36, marginBottom: 12 }}>🥗</div>
           <div style={{ fontSize: 16, fontWeight: 700, color: '#fff', marginBottom: 8 }}>Create Your Meal Plan</div>
-          <div style={{ fontSize: 13, color: '#2D5B3F', marginBottom: 16 }}>Tell us about your preferences and your trainer will design your nutrition</div>
+          <div style={{ fontSize: 13, color: '#2D5B3F', marginBottom: 16, lineHeight: 1.5 }}>
+            {hasUsableWorkoutForMeals(plans)
+              ? 'Tell us about your preferences and your trainer will design your nutrition.'
+              : 'Finish a workout plan first — meal targets are based on your training volume.'}
+          </div>
           <button
-            onClick={() => setView('meal-quiz')}
+            type="button"
+            onClick={() => hasUsableWorkoutForMeals(plans) && setView('meal-quiz')}
+            disabled={!hasUsableWorkoutForMeals(plans)}
             style={{
               width: '100%',
               padding: 16,
               borderRadius: 14,
               border: 'none',
-              background: 'linear-gradient(135deg, #F97316, #EC4899)',
-              color: '#fff',
+              background: hasUsableWorkoutForMeals(plans)
+                ? 'linear-gradient(135deg, #F97316, #EC4899)'
+                : 'rgba(249,115,22,0.2)',
+              color: hasUsableWorkoutForMeals(plans) ? '#fff' : '#2D5B3F',
               fontSize: 15,
               fontWeight: 700,
             }}

@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
+import useSWR from 'swr'
 import dynamic from 'next/dynamic'
 import { useRouter } from 'next/navigation'
 import { motion } from 'framer-motion'
@@ -45,6 +46,31 @@ async function jsonHeadersWithAuth() {
     if (session?.access_token) headers.Authorization = `Bearer ${session.access_token}`
   }
   return headers
+}
+
+async function fetchDashboardPlansWeight([, profileId]) {
+  if (!supabase) return { plansData: [], logs: [] }
+  const runQueries = () =>
+    Promise.all([
+      supabase
+        .from('plans')
+        .select('id, profile_id, type, content, active, created_at')
+        .eq('profile_id', profileId)
+        .eq('active', true),
+      supabase
+        .from('weight_logs')
+        .select('weight_kg, logged_at, created_at, profile_id')
+        .eq('profile_id', profileId)
+        .order('created_at', { ascending: true })
+        .limit(60),
+    ])
+  const [plansResult, logsResult] = await Promise.race([
+    runQueries(),
+    new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 10000)),
+  ])
+  if (plansResult?.error) throw new Error(plansResult.error.message || 'plans error')
+  if (logsResult?.error) throw new Error(logsResult.error.message || 'weight_logs error')
+  return { plansData: plansResult?.data || [], logs: logsResult?.data || [] }
 }
 
 function getGreeting(name) {
@@ -200,7 +226,7 @@ function DashboardShortcutStrip({
 }) {
   const items = [
     { icon: '📋', label: 'Plans', onClick: () => router.push('/plans') },
-    { icon: '💬', label: `Chat`, sub: chatLabel, onClick: () => router.push('/chat') },
+    { icon: '💬', label: 'Coach', sub: chatLabel, onClick: () => router.push('/plans?coach=1') },
     { icon: '🥗', label: 'Log meal', onClick: onOpenFood },
     { icon: '🏋️', label: 'Log workout', onClick: onOpenWorkout },
     { icon: '📷', label: 'Photo', onClick: onOpenPhoto },
@@ -238,9 +264,6 @@ export default function Dashboard() {
   const router = useRouter()
   const { user, profile: authProfile, loading: authLoading, profileLoading, refreshProfile } = useAuth()
   const profileResolutionTimedOut = useProfileResolutionTimeout(user, authProfile, 3000)
-  const [plans, setPlans] = useState({ workout: null, meal: null })
-  const [weightLogs, setWeightLogs] = useState([])
-  const [loading, setLoading] = useState(true)
   const [weightModalOpen, setWeightModalOpen] = useState(false)
   const [trainerModalOpen, setTrainerModalOpen] = useState(false)
   const [foodLogModalOpen, setFoodLogModalOpen] = useState(false)
@@ -263,6 +286,23 @@ export default function Dashboard() {
   const profile = authProfile
   const trainer = profile ? getTrainer(profile.trainer) : getTrainer('bro')
 
+  const dashPwKey = profile?.id && supabase ? ['dash-pw', profile.id] : null
+  const { data: dashPW, mutate: mutateDashPw, isLoading: dashPwLoading, error: dashPwError } = useSWR(
+    dashPwKey,
+    fetchDashboardPlansWeight,
+    { keepPreviousData: true, revalidateOnFocus: true }
+  )
+  const plans = useMemo(() => {
+    const rows = dashPW?.plansData
+    if (!rows) return { workout: null, meal: null }
+    return {
+      workout: rows.find((p) => p.type === 'workout'),
+      meal: rows.find((p) => p.type === 'meal'),
+    }
+  }, [dashPW?.plansData])
+  const weightLogs = useMemo(() => buildWeightLogsFromProfile(profile, dashPW?.logs), [profile, dashPW?.logs])
+  const loading = Boolean(dashPwKey && dashPwLoading && dashPW === undefined && !dashPwError)
+
   useEffect(() => {
     if (!user) {
       router.push('/')
@@ -278,16 +318,6 @@ export default function Dashboard() {
   }, [user, authProfile, profileLoading, authLoading, router, refreshProfile])
 
   const missingProfileId = Boolean(profile) && !profile?.id
-
-  useEffect(() => {
-    if (profile?.id) {
-      loadPlansAndWeightLogs()
-      return
-    }
-    if (user && !profileLoading && missingProfileId) {
-      setLoading(false)
-    }
-  }, [user, profile?.id, profileLoading, missingProfileId])
 
   async function loadProgressPhotos() {
     if (!profile?.id) return
@@ -330,7 +360,7 @@ export default function Dashboard() {
       if (!res.ok || !data.success) {
         throw new Error(data.error || data.details || 'Workout refresh failed')
       }
-      await loadPlansAndWeightLogs({ showLoading: false })
+      await loadPlansAndWeightLogs()
       setToast(null)
     } catch {
       setToast('Photo saved; workout refresh failed—try again from Plans')
@@ -405,107 +435,25 @@ export default function Dashboard() {
     return built
   }
 
-  async function loadPlansAndWeightLogs(options = { showLoading: true }) {
-    const showLoading = options?.showLoading !== false
-    if (!profile?.id) {
-      setLoading(false)
-      return
-    }
-    const profileId = profile.id
-    const profileRow = profile
-
-    if (showLoading) setLoading(true)
-
-    try {
-      if (!supabase) {
-        setPlans({ workout: null, meal: null })
-        setWeightLogs(buildWeightLogsFromProfile(profileRow, null))
-        return
-      }
-
-      const TIMEOUT_MS = 10000
-
-      const runQueries = () =>
-        Promise.all([
-          supabase
-            .from('plans')
-            .select('id, profile_id, type, content, active, created_at')
-            .eq('profile_id', profileId)
-            .eq('active', true),
-          supabase
-            .from('weight_logs')
-            .select('weight_kg, logged_at, created_at, profile_id')
-            .eq('profile_id', profileId)
-            .order('created_at', { ascending: true })
-            .limit(60),
-        ])
-
-      const loadOnce = async () => {
-        const [plansResult, logsResult] = await Promise.race([
-          runQueries(),
-          new Promise((_, reject) =>
-            setTimeout(() => reject(new Error('Dashboard data load timed out')), TIMEOUT_MS)
-          ),
-        ])
-        if (plansResult?.error) throw new Error(plansResult.error.message || 'plans query failed')
-        if (logsResult?.error) throw new Error(logsResult.error.message || 'weight_logs query failed')
-        return { plansData: plansResult?.data, logs: logsResult?.data }
-      }
-
-      let plansData
-      let logs
-      try {
-        ;({ plansData, logs } = await loadOnce())
-      } catch (firstErr) {
-        console.warn('Dashboard data load retrying after:', firstErr?.message)
-        try {
-          ;({ plansData, logs } = await loadOnce())
-        } catch (err) {
-          console.error('Dashboard plans/weight load failed:', err)
-          setPlans((prev) => prev)
-          setWeightLogs((prev) => (prev?.length ? prev : buildWeightLogsFromProfile(profileRow, null)))
-          return
-        }
-      }
-
-      if (plansData) {
-        const workout = plansData.find((p) => p.type === 'workout')
-        const meal = plansData.find((p) => p.type === 'meal')
-        setPlans({ workout, meal })
-      } else {
-        setPlans((prev) => prev)
-      }
-
-      setWeightLogs(buildWeightLogsFromProfile(profileRow, logs))
-    } catch (err) {
-      console.error('Dashboard plans/weight load failed:', err)
-      setPlans((prev) => prev)
-      setWeightLogs((prev) => (prev?.length ? prev : buildWeightLogsFromProfile(profileRow, null)))
-    } finally {
-      setLoading(false)
-    }
+  async function loadPlansAndWeightLogs() {
+    if (!profile?.id) return
+    await mutateDashPw()
   }
 
   async function handleLogWeight(weightKg) {
     if (!profile) return
-    await supabase.from('weight_logs').insert({
-      profile_id: profile.id,
-      weight_kg: weightKg,
-    })
-    await supabase.from('profiles').update({ weight_kg: weightKg }).eq('id', profile.id)
-    await refreshProfile()
-    setWeightLogs((prev) => {
-      const today = new Date().toISOString().split('T')[0]
-      const idx = prev.findIndex((d) => d.date === today)
-      let next
-      if (idx >= 0) {
-        next = [...prev]
-        next[idx] = { ...next[idx], weight_kg: weightKg }
-      } else {
-        next = [...prev, { date: today, weight_kg: weightKg }]
-      }
-      return next.sort((a, b) => a.date.localeCompare(b.date))
-    })
+    try {
+      if (!supabase) return
+      await supabase.from('weight_logs').insert({
+        profile_id: profile.id,
+        weight_kg: weightKg,
+      })
+      await supabase.from('profiles').update({ weight_kg: weightKg }).eq('id', profile.id)
+      refreshProfile().catch(() => {})
+      mutateDashPw()
+    } catch (e) {
+      console.error(e)
+    }
   }
 
   async function handleAnalyze() {
@@ -587,7 +535,7 @@ export default function Dashboard() {
       if (!res.ok || !data.success) {
         throw new Error(data.error || data.details || `Could not update your program (${res.status}).`)
       }
-      await Promise.all([loadPlansAndWeightLogs({ showLoading: false }), refreshProfile()])
+      await Promise.all([loadPlansAndWeightLogs(), refreshProfile()])
       setProgramAdjustText('')
       setToast('Program updated from your notes')
       setTimeout(() => setToast(null), 2500)
@@ -2009,7 +1957,7 @@ export default function Dashboard() {
         <div style={{ fontSize: 11, color: '#2D5B3F', fontWeight: 700, marginBottom: 10 }}>MORE</div>
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
         <button
-          onClick={() => router.push('/chat')}
+          onClick={() => router.push('/plans?coach=1')}
           className="glass-sm"
           style={{ flex: 1, minWidth: 100, padding: 14, textAlign: 'center', border: '1px solid rgba(110,231,183,0.1)' }}
         >
@@ -2033,7 +1981,7 @@ export default function Dashboard() {
           <div style={{ fontSize: 11, fontWeight: 600, color: '#6EE7B7' }}>Log Workout</div>
         </button>
         <button
-          onClick={() => router.push('/chat?prompt=body')}
+          onClick={() => setPhotoModalOpen(true)}
           className="glass-sm"
           style={{ flex: 1, minWidth: 100, padding: 14, textAlign: 'center', border: '1px solid rgba(110,231,183,0.1)' }}
         >
