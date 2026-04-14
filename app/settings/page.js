@@ -325,6 +325,14 @@ export default function Settings() {
             style={inputStyle}
           />
         </div>
+        <button type="button" onClick={persistProfile} disabled={saving} style={{
+          width: '100%', padding: 16, borderRadius: 14, border: 'none', marginBottom: 16,
+          background: savedMsg ? 'rgba(110,231,183,0.15)' : 'linear-gradient(135deg, #10B981, #6EE7B7)',
+          color: savedMsg ? '#6EE7B7' : '#070B07', fontSize: 15, fontWeight: 700,
+          boxShadow: savedMsg ? 'none' : '0 4px 20px rgba(16,185,129,0.25)',
+        }}>
+          {saving ? 'Saving...' : savedMsg ? '✓ Saved!' : 'Save body stats'}
+        </button>
         <div style={{ marginBottom: 16 }}>
           <div style={{ fontSize: 11, color: '#2D5B3F', fontWeight: 600 }}>Change since start</div>
           <div style={{
@@ -338,14 +346,6 @@ export default function Settings() {
         <div style={{ height: 60 }}>
           <ProgressChart data={weightLogs} targetWeight={parseFloat(profile.target_weight)} height={60} />
         </div>
-        <button type="button" onClick={persistProfile} disabled={saving} style={{
-          width: '100%', padding: 16, borderRadius: 14, border: 'none', marginTop: 12,
-          background: savedMsg ? 'rgba(110,231,183,0.15)' : 'linear-gradient(135deg, #10B981, #6EE7B7)',
-          color: savedMsg ? '#6EE7B7' : '#070B07', fontSize: 15, fontWeight: 700,
-          boxShadow: savedMsg ? 'none' : '0 4px 20px rgba(16,185,129,0.25)',
-        }}>
-          {saving ? 'Saving...' : savedMsg ? '✓ Saved!' : 'Save body stats'}
-        </button>
       </div>
 
       {/* Preferences Section */}

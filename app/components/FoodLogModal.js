@@ -22,7 +22,7 @@ async function authJsonHeaders() {
   return headers
 }
 
-function foodItemFromMealAnalysis(it) {
+function foodItemFromMealAnalysis(it, portionLabel = 'photo est.') {
   const g = Math.max(1, Math.round(Number(it.grams) || 100))
   const cal = Number(it.calories) || 0
   const p = Number(it.protein) || 0
@@ -33,7 +33,7 @@ function foodItemFromMealAnalysis(it) {
     name: String(it.name || 'Food').slice(0, 120),
     brand: '',
     image: null,
-    servingSize: `${g}g (photo est.)`,
+    servingSize: `${g}g (${portionLabel})`,
     per100g: {
       calories: cal * scale,
       protein: p * scale,
@@ -62,6 +62,9 @@ export default function FoodLogModal({ open, onClose, profileId, onLog }) {
   const [saving, setSaving] = useState(false)
   const [photoBusy, setPhotoBusy] = useState(false)
   const [photoHint, setPhotoHint] = useState(null)
+  const [describeText, setDescribeText] = useState('')
+  const [describeBusy, setDescribeBusy] = useState(false)
+  const [describeHint, setDescribeHint] = useState(null)
 
   const debouncedSearch = useDebounce(search, 300)
 
@@ -69,6 +72,9 @@ export default function FoodLogModal({ open, onClose, profileId, onLog }) {
     if (!open) {
       setPhotoBusy(false)
       setPhotoHint(null)
+      setDescribeBusy(false)
+      setDescribeHint(null)
+      setDescribeText('')
     }
   }, [open])
 
@@ -121,7 +127,7 @@ export default function FoodLogModal({ open, onClose, profileId, onLog }) {
       const items = Array.isArray(a?.items) ? a.items : []
       for (const it of items) {
         const g = Math.max(1, Math.round(Number(it.grams) || 100))
-        addFood(foodItemFromMealAnalysis(it), g)
+        addFood(foodItemFromMealAnalysis(it, 'photo est.'), g)
       }
       if (items.length === 0) {
         setPhotoHint(typeof a?.notes === 'string' ? a.notes : 'No foods detected — try a clearer photo.')
@@ -136,6 +142,41 @@ export default function FoodLogModal({ open, onClose, profileId, onLog }) {
       setPhotoHint('Could not analyze photo.')
     } finally {
       setPhotoBusy(false)
+    }
+  }
+
+  async function handleDescribeMeal() {
+    const text = describeText?.trim()
+    if (!text || !profileId) return
+    setDescribeBusy(true)
+    setDescribeHint(null)
+    try {
+      const res = await fetch('/api/analyze-meal-text', {
+        method: 'POST',
+        headers: await authJsonHeaders(),
+        body: JSON.stringify({ profileId, description: text }),
+      })
+      const data = await res.json().catch(() => ({}))
+      const a = data.analysis || data
+      const items = Array.isArray(a?.items) ? a.items : []
+      for (const it of items) {
+        const g = Math.max(1, Math.round(Number(it.grams) || 100))
+        addFood(foodItemFromMealAnalysis(it, 'described'), g)
+      }
+      if (items.length === 0) {
+        setDescribeHint(typeof a?.notes === 'string' ? a.notes : 'No foods parsed — try listing items more clearly.')
+      } else {
+        setDescribeHint(
+          a?.mealLabel
+            ? `${a.mealLabel} · estimates only`
+            : 'Added from description (estimates — adjust grams if needed).'
+        )
+        setDescribeText('')
+      }
+    } catch {
+      setDescribeHint('Could not parse description.')
+    } finally {
+      setDescribeBusy(false)
     }
   }
 
@@ -306,6 +347,65 @@ export default function FoodLogModal({ open, onClose, profileId, onLog }) {
           {photoHint && (
             <div style={{ fontSize: 12, color: '#A7C4B8', marginBottom: 12, lineHeight: 1.45 }}>{photoHint}</div>
           )}
+
+          <div style={{ marginBottom: 12 }}>
+            <label
+              style={{
+                display: 'block',
+                fontSize: 11,
+                color: '#2D5B3F',
+                fontWeight: 600,
+                marginBottom: 8,
+              }}
+            >
+              Describe your meal
+            </label>
+            <textarea
+              value={describeText}
+              onChange={(e) => setDescribeText(e.target.value)}
+              placeholder="e.g. 2 scrambled eggs, 2 slices whole wheat toast with butter, black coffee"
+              rows={3}
+              disabled={describeBusy}
+              style={{
+                width: '100%',
+                padding: '12px 14px',
+                borderRadius: 14,
+                border: '1px solid rgba(110,231,183,0.2)',
+                background: 'rgba(14,20,14,0.6)',
+                color: '#fff',
+                fontSize: 13,
+                lineHeight: 1.45,
+                resize: 'vertical',
+                minHeight: 72,
+                fontFamily: 'inherit',
+                marginBottom: 10,
+              }}
+            />
+            <button
+              type="button"
+              onClick={handleDescribeMeal}
+              disabled={describeBusy || !describeText.trim()}
+              style={{
+                width: '100%',
+                padding: '12px 16px',
+                borderRadius: 14,
+                border: 'none',
+                background:
+                  describeBusy || !describeText.trim()
+                    ? 'rgba(16,185,129,0.15)'
+                    : 'linear-gradient(135deg, #10B981, #6EE7B7)',
+                color: describeBusy || !describeText.trim() ? '#2D5B3F' : '#070B07',
+                fontSize: 14,
+                fontWeight: 700,
+                cursor: describeBusy || !describeText.trim() ? 'not-allowed' : 'pointer',
+              }}
+            >
+              {describeBusy ? 'Parsing…' : 'Add from description'}
+            </button>
+            {describeHint && (
+              <div style={{ fontSize: 12, color: '#A7C4B8', marginTop: 10, lineHeight: 1.45 }}>{describeHint}</div>
+            )}
+          </div>
 
           <div
             style={{

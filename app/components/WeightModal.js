@@ -74,6 +74,8 @@ export default function WeightModal({ open, onClose, profile, onSave }) {
           style={{
             width: '100%',
             maxWidth: 480,
+            maxHeight: '85vh',
+            overflowY: 'auto',
             padding: 24,
             borderTopLeftRadius: 24,
             borderTopRightRadius: 24,
@@ -84,7 +86,7 @@ export default function WeightModal({ open, onClose, profile, onSave }) {
           <div style={{ fontSize: 18, fontWeight: 700, color: '#fff', marginBottom: 20 }}>
             Log Weight
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 24 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
             <input
               type="number"
               inputMode="decimal"
@@ -106,41 +108,42 @@ export default function WeightModal({ open, onClose, profile, onSave }) {
             />
             <span style={{ fontSize: 20, fontWeight: 600, color: '#2D5B3F' }}>{label}</span>
           </div>
-          <div style={{ display: 'flex', gap: 12 }}>
-            <button
-              onClick={onClose}
-              style={{
-                flex: 1,
-                padding: 16,
-                background: 'transparent',
-                border: '1px solid rgba(110,231,183,0.15)',
-                borderRadius: 14,
-                color: '#2D5B3F',
-                fontSize: 15,
-                fontWeight: 600,
-              }}
-            >
-              Cancel
-            </button>
-            <button
-              onClick={handleSave}
-              disabled={!value}
-              style={{
-                flex: 2,
-                padding: 16,
-                border: 'none',
-                borderRadius: 14,
-                background: 'linear-gradient(135deg, #10B981, #6EE7B7)',
-                color: '#070B07',
-                fontSize: 15,
-                fontWeight: 700,
-                boxShadow: '0 4px 20px rgba(16,185,129,0.25)',
-                opacity: !value ? 0.6 : 1,
-              }}
-            >
-              Save
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={handleSave}
+            disabled={!value}
+            style={{
+              width: '100%',
+              padding: 16,
+              border: 'none',
+              borderRadius: 14,
+              marginBottom: 12,
+              background: 'linear-gradient(135deg, #10B981, #6EE7B7)',
+              color: '#070B07',
+              fontSize: 16,
+              fontWeight: 700,
+              boxShadow: '0 4px 20px rgba(16,185,129,0.25)',
+              opacity: !value ? 0.6 : 1,
+            }}
+          >
+            Save
+          </button>
+          <button
+            type="button"
+            onClick={onClose}
+            style={{
+              width: '100%',
+              padding: 14,
+              background: 'transparent',
+              border: '1px solid rgba(110,231,183,0.15)',
+              borderRadius: 14,
+              color: '#2D5B3F',
+              fontSize: 15,
+              fontWeight: 600,
+            }}
+          >
+            Cancel
+          </button>
         </motion.div>
       </motion.div>
     </AnimatePresence>
