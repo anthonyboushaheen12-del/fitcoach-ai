@@ -308,6 +308,14 @@ export default function Dashboard() {
   const loading = Boolean(dashPwKey && dashPwLoading && dashPW === undefined && !dashPwError)
 
   useEffect(() => {
+    if (typeof window === 'undefined') return
+    const q = new URLSearchParams(window.location.search)
+    if (q.get('logMeal') !== '1') return
+    setFoodLogModalOpen(true)
+    router.replace('/dashboard', { scroll: false })
+  }, [router])
+
+  useEffect(() => {
     if (!user) {
       router.push('/')
       return

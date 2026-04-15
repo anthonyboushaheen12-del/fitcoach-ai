@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
+import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { motion, AnimatePresence } from 'framer-motion'
 import useSWR from 'swr'
@@ -14,6 +15,7 @@ import WorkoutMuscleMap from '../components/WorkoutMuscleMap'
 import { compressImageForUpload } from '../../lib/image-compress'
 import PlanCoachPanel from '../components/PlanCoachPanel'
 import { computeNutritionTargets } from '../../lib/nutrition-targets'
+import { parseDailyCaloriesNumber } from '../../lib/meal-plan-summary'
 
 async function jsonHeadersWithAuth() {
   const headers = { 'Content-Type': 'application/json' }
@@ -22,6 +24,25 @@ async function jsonHeadersWithAuth() {
     if (session?.access_token) headers.Authorization = `Bearer ${session.access_token}`
   }
   return headers
+}
+
+/** Turn analyze-meal / analyze-meal-text JSON into one line for eatingToday / generate-plan context. */
+function formatMealAnalysisForPlanContext(a, source) {
+  if (!a || !Array.isArray(a.items)) return ''
+  const items = a.items
+  if (items.length === 0) return ''
+  const lines = items.map((it) => {
+    const g = Math.round(Number(it.grams) || 0)
+    const n = String(it.name || '').trim()
+    return g ? `${n} (~${g}g)` : n
+  })
+  const label = a.mealLabel ? String(a.mealLabel) : 'Meal'
+  const totals = []
+  if (Number.isFinite(Number(a.totalCalories))) totals.push(`~${Math.round(Number(a.totalCalories))} cal`)
+  if (Number.isFinite(Number(a.totalProteinG))) totals.push(`P ${Math.round(Number(a.totalProteinG))}g`)
+  const tail = totals.length ? ` (${totals.join(', ')}, estimates)` : ' (macro estimates)'
+  const prefix = source === 'photo' ? '[From photo]' : '[From description]'
+  return `${prefix} ${label}${tail}: ${lines.join('; ')}.`
 }
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
@@ -285,6 +306,10 @@ export default function Plans() {
   )
   const [pantryDescription, setPantryDescription] = useState('')
   const [eatingToday, setEatingToday] = useState('')
+  const [plansMealDescribeDraft, setPlansMealDescribeDraft] = useState('')
+  const [plansMealContextBusy, setPlansMealContextBusy] = useState(null)
+  const [plansMealContextHint, setPlansMealContextHint] = useState(null)
+  const [showFormulaEstimate, setShowFormulaEstimate] = useState(false)
   const [view, setView] = useState('overview')
   const [subView, setSubView] = useState('today')
   const [expandedDay, setExpandedDay] = useState(null)
@@ -508,6 +533,79 @@ export default function Plans() {
       console.error(err)
       setBodyAnalysisStatus('error')
       setGenError(err?.message || 'Could not process photo')
+    }
+  }
+
+  async function handlePlansMealPhotoForContext(e) {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file || !profile?.id || !file.type.startsWith('image/')) return
+    setPlansMealContextBusy('photo')
+    setPlansMealContextHint(null)
+    setGenError(null)
+    try {
+      const { base64, mediaType } = await compressImageForUpload(file)
+      const res = await fetch('/api/analyze-meal', {
+        method: 'POST',
+        headers: await jsonHeadersWithAuth(),
+        body: JSON.stringify({ profileId: profile.id, image: base64, mediaType }),
+      })
+      const data = await res.json().catch(() => ({}))
+      const a = data.analysis || data
+      const summary = formatMealAnalysisForPlanContext(a, 'photo')
+      if (summary) {
+        setEatingToday((prev) => [prev.trim(), summary].filter(Boolean).join('\n\n'))
+        setPlansMealContextHint(
+          typeof a?.mealLabel === 'string' && a.mealLabel
+            ? `Added “${a.mealLabel}” to your eating-today context (merged below).`
+            : 'Photo summary added to eating-today context for the next meal plan generation.'
+        )
+      } else {
+        setPlansMealContextHint(
+          typeof a?.notes === 'string' ? a.notes : 'No foods detected — try a clearer photo.'
+        )
+      }
+    } catch (err) {
+      console.error(err)
+      setPlansMealContextHint('Could not analyze photo.')
+    } finally {
+      setPlansMealContextBusy(null)
+    }
+  }
+
+  async function handlePlansDescribeMealForContext() {
+    const text = plansMealDescribeDraft?.trim()
+    if (!text || !profile?.id) return
+    setPlansMealContextBusy('text')
+    setPlansMealContextHint(null)
+    setGenError(null)
+    try {
+      const res = await fetch('/api/analyze-meal-text', {
+        method: 'POST',
+        headers: await jsonHeadersWithAuth(),
+        body: JSON.stringify({ profileId: profile.id, description: text }),
+      })
+      const data = await res.json().catch(() => ({}))
+      const a = data.analysis || data
+      const summary = formatMealAnalysisForPlanContext(a, 'text')
+      if (summary) {
+        setEatingToday((prev) => [prev.trim(), summary].filter(Boolean).join('\n\n'))
+        setPlansMealDescribeDraft('')
+        setPlansMealContextHint(
+          typeof a?.mealLabel === 'string' && a.mealLabel
+            ? `Added “${a.mealLabel}” to your eating-today context.`
+            : 'Description merged into eating-today context.'
+        )
+      } else {
+        setPlansMealContextHint(
+          typeof a?.notes === 'string' ? a.notes : 'Could not parse — try listing foods and rough amounts.'
+        )
+      }
+    } catch (err) {
+      console.error(err)
+      setPlansMealContextHint('Could not analyze description.')
+    } finally {
+      setPlansMealContextBusy(null)
     }
   }
 
@@ -764,6 +862,13 @@ export default function Plans() {
   const activeWorkout = plans.find((p) => p.type === 'workout' && p.active)
   const activeMeal = plans.find((p) => p.type === 'meal' && p.active)
   const macroTargetsPreview = computeNutritionTargets(profile, activeWorkout?.content ?? null)
+  const savedPlanCaloriesN = parseDailyCaloriesNumber(activeMeal?.content?.dailyCalories)
+  const previewCaloriesN = Number(macroTargetsPreview?.calories)
+  const targetsMismatch =
+    !!activeMeal &&
+    Number.isFinite(savedPlanCaloriesN) &&
+    Number.isFinite(previewCaloriesN) &&
+    Math.abs(savedPlanCaloriesN - previewCaloriesN) > 100
 
   const todayIdx = new Date().getDay()
   const todayStr = DAY_NAMES[todayIdx]
@@ -1478,8 +1583,81 @@ export default function Plans() {
                   onChange={(e) => setEatingToday(e.target.value)}
                   placeholder="Context for one-off meals or events"
                   rows={2}
-                  style={{ ...inputStyle, marginBottom: 16, fontSize: 13 }}
+                  style={{ ...inputStyle, marginBottom: 10, fontSize: 13 }}
                 />
+                <div style={{ fontSize: 11, color: '#2D5B3F', fontWeight: 600, marginBottom: 6 }}>
+                  Or add meal context from a photo / short description (appends to eating today)
+                </div>
+                <div style={{ marginBottom: 10 }}>
+                  <label style={{ cursor: plansMealContextBusy ? 'default' : 'pointer', display: 'inline-block' }}>
+                    <input
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp"
+                      style={{ display: 'none' }}
+                      onChange={handlePlansMealPhotoForContext}
+                      disabled={!!plansMealContextBusy}
+                    />
+                    <span
+                      style={{
+                        display: 'inline-block',
+                        padding: '8px 14px',
+                        borderRadius: 10,
+                        border: '1px solid rgba(249,115,22,0.35)',
+                        background: 'rgba(249,115,22,0.08)',
+                        color: '#FB923C',
+                        fontSize: 12,
+                        fontWeight: 600,
+                      }}
+                    >
+                      {plansMealContextBusy === 'photo' ? 'Analyzing photo…' : 'Add meal photo'}
+                    </span>
+                  </label>
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', marginBottom: 16 }}>
+                  <input
+                    type="text"
+                    value={plansMealDescribeDraft}
+                    onChange={(e) => setPlansMealDescribeDraft(e.target.value)}
+                    placeholder="e.g. Large burrito, soda"
+                    disabled={!!plansMealContextBusy}
+                    style={{
+                      flex: '1 1 180px',
+                      minWidth: 0,
+                      padding: '10px 12px',
+                      borderRadius: 10,
+                      border: '1px solid rgba(110,231,183,0.12)',
+                      background: 'rgba(7,11,7,0.6)',
+                      color: '#E2FBE8',
+                      fontSize: 13,
+                      fontFamily: "'Outfit', sans-serif",
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={handlePlansDescribeMealForContext}
+                    disabled={!plansMealDescribeDraft.trim() || !!plansMealContextBusy}
+                    style={{
+                      padding: '10px 14px',
+                      borderRadius: 10,
+                      border: 'none',
+                      background:
+                        plansMealDescribeDraft.trim() && !plansMealContextBusy
+                          ? 'linear-gradient(135deg, #F97316, #EC4899)'
+                          : 'rgba(249,115,22,0.2)',
+                      color: plansMealDescribeDraft.trim() && !plansMealContextBusy ? '#fff' : '#2D5B3F',
+                      fontSize: 12,
+                      fontWeight: 700,
+                      cursor: plansMealDescribeDraft.trim() && !plansMealContextBusy ? 'pointer' : 'default',
+                    }}
+                  >
+                    {plansMealContextBusy === 'text' ? '…' : 'Add to context'}
+                  </button>
+                </div>
+                {plansMealContextHint && (
+                  <div style={{ fontSize: 11, color: '#86EFAC', marginBottom: 16, lineHeight: 1.45 }}>
+                    {plansMealContextHint}
+                  </div>
+                )}
               </>
             )}
             {genError && <div style={{ color: '#FB7185', fontSize: 13, marginBottom: 12 }}>{genError}</div>}
@@ -1562,10 +1740,50 @@ export default function Plans() {
             background: 'linear-gradient(145deg, rgba(249,115,22,0.06), rgba(14,20,14,0.75))',
           }}
         >
-          <div style={{ fontSize: 13, fontWeight: 700, color: '#FB923C', marginBottom: 8 }}>Nutrition targets</div>
+          <div style={{ fontSize: 13, fontWeight: 700, color: '#FB923C', marginBottom: 8 }}>
+            {activeMeal ? 'Nutrition targets (from your saved meal plan)' : 'Nutrition targets'}
+          </div>
           <p style={{ fontSize: 12, color: '#2D5B3F', margin: '0 0 12px', lineHeight: 1.45 }}>
-            Estimated from your profile and training volume. Your coach uses these when building meals.
+            {activeMeal
+              ? 'These match the meal plan card below. Regenerate if you want them to follow the latest profile + workout formula.'
+              : 'Estimated from your profile and training volume. Your coach uses these when building meals.'}
           </p>
+          {targetsMismatch && (
+            <div
+              style={{
+                marginBottom: 12,
+                padding: 12,
+                borderRadius: 12,
+                border: '1px solid rgba(251,146,60,0.35)',
+                background: 'rgba(249,115,22,0.12)',
+              }}
+            >
+              <div style={{ fontSize: 12, fontWeight: 700, color: '#FDBA74', marginBottom: 6 }}>
+                Saved meal plan calories ({savedPlanCaloriesN.toLocaleString('en-US')}) differ from the current formula (~
+                {previewCaloriesN.toLocaleString('en-US')}).
+              </div>
+              <p style={{ fontSize: 11, color: '#A7C4B8', margin: '0 0 10px', lineHeight: 1.45 }}>
+                Regenerate your meal plan to align the database with today&apos;s targets, or expand &quot;Formula
+                estimate&quot; to compare.
+              </p>
+              <button
+                type="button"
+                onClick={() => setView('meal-quiz')}
+                style={{
+                  padding: '8px 14px',
+                  borderRadius: 10,
+                  border: 'none',
+                  background: 'linear-gradient(135deg, #F97316, #EC4899)',
+                  color: '#fff',
+                  fontSize: 12,
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                }}
+              >
+                Regenerate meal plan
+              </button>
+            </div>
+          )}
           <div
             style={{
               display: 'grid',
@@ -1576,26 +1794,203 @@ export default function Plans() {
               color: '#E2FBE8',
             }}
           >
-            <div>
-              <span style={{ color: '#2D5B3F', fontSize: 11 }}>Calories</span>
-              <div style={{ fontWeight: 700 }}>~{macroTargetsPreview.calories}</div>
-            </div>
-            <div>
-              <span style={{ color: '#2D5B3F', fontSize: 11 }}>Protein</span>
-              <div style={{ fontWeight: 700 }}>~{macroTargetsPreview.proteinG} g</div>
-            </div>
-            <div>
-              <span style={{ color: '#2D5B3F', fontSize: 11 }}>Carbs</span>
-              <div style={{ fontWeight: 700 }}>~{macroTargetsPreview.carbsG} g</div>
-            </div>
-            <div>
-              <span style={{ color: '#2D5B3F', fontSize: 11 }}>Fats</span>
-              <div style={{ fontWeight: 700 }}>~{macroTargetsPreview.fatsG} g</div>
-            </div>
+            {activeMeal?.content ? (
+              <>
+                <div>
+                  <span style={{ color: '#2D5B3F', fontSize: 11 }}>Calories</span>
+                  <div style={{ fontWeight: 700 }}>{activeMeal.content.dailyCalories ?? '—'}</div>
+                </div>
+                <div>
+                  <span style={{ color: '#2D5B3F', fontSize: 11 }}>Protein</span>
+                  <div style={{ fontWeight: 700 }}>{activeMeal.content.protein ?? '—'}</div>
+                </div>
+                <div>
+                  <span style={{ color: '#2D5B3F', fontSize: 11 }}>Carbs</span>
+                  <div style={{ fontWeight: 700 }}>{activeMeal.content.carbs ?? '—'}</div>
+                </div>
+                <div>
+                  <span style={{ color: '#2D5B3F', fontSize: 11 }}>Fats</span>
+                  <div style={{ fontWeight: 700 }}>{activeMeal.content.fats ?? '—'}</div>
+                </div>
+              </>
+            ) : (
+              <>
+                <div>
+                  <span style={{ color: '#2D5B3F', fontSize: 11 }}>Calories</span>
+                  <div style={{ fontWeight: 700 }}>~{macroTargetsPreview.calories}</div>
+                </div>
+                <div>
+                  <span style={{ color: '#2D5B3F', fontSize: 11 }}>Protein</span>
+                  <div style={{ fontWeight: 700 }}>~{macroTargetsPreview.proteinG} g</div>
+                </div>
+                <div>
+                  <span style={{ color: '#2D5B3F', fontSize: 11 }}>Carbs</span>
+                  <div style={{ fontWeight: 700 }}>~{macroTargetsPreview.carbsG} g</div>
+                </div>
+                <div>
+                  <span style={{ color: '#2D5B3F', fontSize: 11 }}>Fats</span>
+                  <div style={{ fontWeight: 700 }}>~{macroTargetsPreview.fatsG} g</div>
+                </div>
+              </>
+            )}
           </div>
-          {macroTargetsPreview.note && (
+          {activeMeal?.content && (
+            <>
+              <button
+                type="button"
+                onClick={() => setShowFormulaEstimate((v) => !v)}
+                style={{
+                  display: 'block',
+                  width: '100%',
+                  marginBottom: showFormulaEstimate ? 10 : 12,
+                  padding: '10px 12px',
+                  borderRadius: 10,
+                  border: '1px solid rgba(249,115,22,0.25)',
+                  background: 'rgba(14,20,14,0.5)',
+                  color: '#FB923C',
+                  fontSize: 12,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                }}
+              >
+                {showFormulaEstimate ? 'Hide formula estimate' : 'Formula estimate (profile + workout)'}
+              </button>
+              {showFormulaEstimate && (
+                <div
+                  style={{
+                    marginBottom: 12,
+                    padding: 12,
+                    borderRadius: 12,
+                    border: '1px solid rgba(110,231,183,0.08)',
+                    background: 'rgba(7,11,7,0.55)',
+                  }}
+                >
+                  <div style={{ fontSize: 11, fontWeight: 600, color: '#A7C4B8', marginBottom: 8 }}>
+                    Estimated from your profile and training volume (not yet written into the saved plan until you
+                    regenerate)
+                  </div>
+                  <div
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: 'repeat(2, 1fr)',
+                      gap: 10,
+                      fontSize: 13,
+                      color: '#E2FBE8',
+                    }}
+                  >
+                    <div>
+                      <span style={{ color: '#2D5B3F', fontSize: 11 }}>Calories</span>
+                      <div style={{ fontWeight: 700 }}>~{macroTargetsPreview.calories}</div>
+                    </div>
+                    <div>
+                      <span style={{ color: '#2D5B3F', fontSize: 11 }}>Protein</span>
+                      <div style={{ fontWeight: 700 }}>~{macroTargetsPreview.proteinG} g</div>
+                    </div>
+                    <div>
+                      <span style={{ color: '#2D5B3F', fontSize: 11 }}>Carbs</span>
+                      <div style={{ fontWeight: 700 }}>~{macroTargetsPreview.carbsG} g</div>
+                    </div>
+                    <div>
+                      <span style={{ color: '#2D5B3F', fontSize: 11 }}>Fats</span>
+                      <div style={{ fontWeight: 700 }}>~{macroTargetsPreview.fatsG} g</div>
+                    </div>
+                  </div>
+                  {macroTargetsPreview.note && (
+                    <p style={{ fontSize: 11, color: '#A7C4B8', margin: '10px 0 0' }}>{macroTargetsPreview.note}</p>
+                  )}
+                </div>
+              )}
+            </>
+          )}
+          {!activeMeal?.content && macroTargetsPreview.note && (
             <p style={{ fontSize: 11, color: '#A7C4B8', margin: '0 0 12px' }}>{macroTargetsPreview.note}</p>
           )}
+          <p style={{ fontSize: 11, color: '#A7C4B8', margin: '0 0 12px', lineHeight: 1.5 }}>
+            To log what you ate with full macros,{' '}
+            <Link href="/log-meal" style={{ color: '#6EE7B7', fontWeight: 700 }}>
+              open Log meal on Home
+            </Link>
+            .
+          </p>
+          <div
+            style={{
+              marginBottom: 14,
+              paddingBottom: 14,
+              borderBottom: '1px solid rgba(249,115,22,0.12)',
+            }}
+          >
+            <div style={{ fontSize: 11, fontWeight: 600, color: '#2D5B3F', marginBottom: 8 }}>
+              Meal context for next generation (photo or short description)
+            </div>
+            <div style={{ marginBottom: 10 }}>
+              <label style={{ cursor: plansMealContextBusy ? 'default' : 'pointer', display: 'inline-block' }}>
+                <input
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  style={{ display: 'none' }}
+                  onChange={handlePlansMealPhotoForContext}
+                  disabled={!!plansMealContextBusy}
+                />
+                <span
+                  style={{
+                    display: 'inline-block',
+                    padding: '8px 14px',
+                    borderRadius: 10,
+                    border: '1px solid rgba(249,115,22,0.35)',
+                    background: 'rgba(249,115,22,0.08)',
+                    color: '#FB923C',
+                    fontSize: 12,
+                    fontWeight: 600,
+                  }}
+                >
+                  {plansMealContextBusy === 'photo' ? 'Analyzing photo…' : 'Add meal photo'}
+                </span>
+              </label>
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', marginBottom: 8 }}>
+              <input
+                type="text"
+                value={plansMealDescribeDraft}
+                onChange={(e) => setPlansMealDescribeDraft(e.target.value)}
+                placeholder="Describe a meal (e.g. 2 eggs, toast, coffee)"
+                disabled={!!plansMealContextBusy}
+                style={{
+                  flex: '1 1 200px',
+                  minWidth: 0,
+                  padding: '10px 12px',
+                  borderRadius: 10,
+                  border: '1px solid rgba(110,231,183,0.12)',
+                  background: 'rgba(7,11,7,0.6)',
+                  color: '#E2FBE8',
+                  fontSize: 13,
+                  fontFamily: "'Outfit', sans-serif",
+                }}
+              />
+              <button
+                type="button"
+                onClick={handlePlansDescribeMealForContext}
+                disabled={!plansMealDescribeDraft.trim() || !!plansMealContextBusy}
+                style={{
+                  padding: '10px 14px',
+                  borderRadius: 10,
+                  border: 'none',
+                  background:
+                    plansMealDescribeDraft.trim() && !plansMealContextBusy
+                      ? 'linear-gradient(135deg, #F97316, #EC4899)'
+                      : 'rgba(249,115,22,0.2)',
+                  color: plansMealDescribeDraft.trim() && !plansMealContextBusy ? '#fff' : '#2D5B3F',
+                  fontSize: 12,
+                  fontWeight: 700,
+                  cursor: plansMealDescribeDraft.trim() && !plansMealContextBusy ? 'pointer' : 'default',
+                }}
+              >
+                {plansMealContextBusy === 'text' ? '…' : 'Add to context'}
+              </button>
+            </div>
+            {plansMealContextHint && (
+              <div style={{ fontSize: 11, color: '#86EFAC', lineHeight: 1.45 }}>{plansMealContextHint}</div>
+            )}
+          </div>
           <label style={{ fontSize: 11, color: '#2D5B3F', fontWeight: 600, display: 'block', marginBottom: 6 }}>
             Pantry / what you have on hand
           </label>

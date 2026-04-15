@@ -8,6 +8,7 @@ import { useAuth } from './AuthProvider'
 const SIDEBAR_W = 220
 const TABS = [
   { id: '/dashboard', icon: '🏠', label: 'Home' },
+  { id: '/log-meal', icon: '\uD83E\uDD57', label: 'Meal' },
   { id: '/plans', icon: '📋', label: 'Plans' },
   { id: '/goals', icon: '🎯', label: 'Goals' },
   { id: '/settings', icon: '⚙️', label: 'Settings' },
@@ -30,6 +31,7 @@ export default function AppShell({ children }) {
   useEffect(() => {
     if (authLoading || !user) return
     router.prefetch('/dashboard')
+    router.prefetch('/log-meal')
     router.prefetch('/plans')
   }, [authLoading, user, router])
 
