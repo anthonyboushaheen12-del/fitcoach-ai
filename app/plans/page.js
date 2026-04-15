@@ -19,9 +19,16 @@ import { parseDailyCaloriesNumber } from '../../lib/meal-plan-summary'
 
 async function jsonHeadersWithAuth() {
   const headers = { 'Content-Type': 'application/json' }
-  if (supabase) {
-    const { data: { session } } = await supabase.auth.getSession()
-    if (session?.access_token) headers.Authorization = `Bearer ${session.access_token}`
+  if (!supabase) return headers
+  let {
+    data: { session },
+  } = await supabase.auth.getSession()
+  if (!session?.access_token) {
+    const { data: refreshed } = await supabase.auth.refreshSession()
+    session = refreshed?.session ?? null
+  }
+  if (session?.access_token) {
+    headers.Authorization = `Bearer ${session.access_token}`
   }
   return headers
 }
@@ -515,9 +522,11 @@ export default function Plans() {
       setBodyAnalysis(analysis)
       setBodyAnalysisStatus('done')
       if (profile?.id && analysis && !initialProgressPhotoSavedRef.current) {
+        const saveHeaders = await jsonHeadersWithAuth()
+        const accessToken = saveHeaders.Authorization?.replace(/^Bearer\s+/i, '').trim() || ''
         const pr = await fetch('/api/progress-photo', {
           method: 'POST',
-          headers: await jsonHeadersWithAuth(),
+          headers: saveHeaders,
           body: JSON.stringify({
             profileId: profile.id,
             imageBase64: base64,
@@ -525,6 +534,7 @@ export default function Plans() {
             weightAtTime: profile.weight_kg,
             notes: 'Initial body assessment',
             photoType: 'front',
+            ...(accessToken ? { accessToken } : {}),
           }),
         })
         if (pr.ok) initialProgressPhotoSavedRef.current = true

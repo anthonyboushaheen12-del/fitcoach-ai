@@ -67,6 +67,8 @@ export default function PhotoUploadModal({ isOpen, onClose, profile, onSaved, la
       setBusy(false)
       return
     }
+    const accessToken =
+      authHeaders.Authorization.replace(/^Bearer\s+/i, '').trim() || ''
 
     try {
       for (let i = 0; i < files.length; i++) {
@@ -90,6 +92,7 @@ export default function PhotoUploadModal({ isOpen, onClose, profile, onSaved, la
             weightAtTime: wVal,
             notes: notesVal,
             photoType,
+            accessToken,
           }
           if (batchSessionId) body.sessionId = batchSessionId
 

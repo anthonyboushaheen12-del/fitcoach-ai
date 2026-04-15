@@ -13,21 +13,23 @@ function isRlsPolicyError(err) {
   return m.includes('row-level security') || m.includes('rls')
 }
 
-/** User-facing hint when Supabase has no progress_sessions or stale schema cache. */
+/** User-facing hint when Supabase schema is missing progress_sessions / session_id or cache is stale. */
 function hintProgressSessionsSetup(rawMessage) {
   const m = (rawMessage || '').toLowerCase()
-  if (!m.includes('progress_sessions')) return null
-  if (
+  const steps =
+    'Use the Supabase project whose URL matches Vercel env NEXT_PUBLIC_SUPABASE_URL. In SQL Editor run ' +
+    '(1) supabase-progress-sessions-migration.sql (2) supabase-progress-photo-rpc.sql. ' +
+    'Then Project Settings → API → reload schema (or wait one minute).'
+  const schemaMiss =
     m.includes('schema cache') ||
     m.includes('could not find') ||
     m.includes('does not exist') ||
     (m.includes('relation') && m.includes('does not exist'))
-  ) {
-    return (
-      'Progress check-ins need the latest database setup. In Supabase: open SQL Editor and run ' +
-      'supabase-progress-sessions-migration.sql from the repo, then supabase-progress-photo-rpc.sql. ' +
-      'After that, use Dashboard → Project Settings → API → reload schema (or wait a minute).'
-    )
+  if (m.includes('progress_sessions') && schemaMiss) {
+    return `Database setup: ${steps}`
+  }
+  if ((m.includes('session_id') || m.includes('progress_sessions')) && (m.includes('column') || m.includes('null value'))) {
+    return `Database setup: ${steps}`
   }
   return null
 }
@@ -162,7 +164,8 @@ export async function GET(request) {
     .order('created_at', { ascending: true })
 
   if (error) {
-    return Response.json({ error: error.message }, { status: 500 })
+    const hint = hintProgressSessionsSetup(error.message)
+    return Response.json({ error: hint || error.message }, { status: 500 })
   }
 
   const withSessions = attachSessionsToPhotos(rows, sessions)
@@ -252,7 +255,16 @@ export async function DELETE(request) {
 }
 
 export async function POST(request) {
-  const token = getBearerToken(request)
+  let body
+  try {
+    body = await request.json()
+  } catch {
+    return Response.json({ error: 'Invalid JSON body' }, { status: 400 })
+  }
+
+  const headerToken = getBearerToken(request)
+  const bodyToken = typeof body.accessToken === 'string' ? body.accessToken.trim() : ''
+  const token = headerToken || bodyToken || null
   if (!token) {
     return Response.json({ error: 'Not authenticated' }, { status: 401 })
   }
@@ -265,7 +277,6 @@ export async function POST(request) {
   }
 
   try {
-    const body = await request.json()
     const {
       profileId,
       imageBase64,
@@ -359,15 +370,17 @@ export async function POST(request) {
       await storageClient.storage.from(BUCKET).remove([storagePath])
       const msg = insertError.message || ''
       const lower = msg.toLowerCase()
+      const sessionHint = hintProgressSessionsSetup(msg)
       const hint =
-        lower.includes('insert_owned_progress_photo') ||
+        sessionHint ||
+        (lower.includes('insert_owned_progress_photo') ||
         lower.includes('does not exist') ||
         lower.includes('42883') ||
         lower.includes('session_id')
           ? 'Database may need migration: run supabase-progress-sessions-migration.sql and supabase-progress-photo-rpc.sql in Supabase, and set SUPABASE_SERVICE_ROLE_KEY if inserts fail.'
           : isRlsPolicyError(insertError)
             ? `${msg} Fix: run supabase-progress-photo-rpc.sql in Supabase (ALTER FUNCTION ... OWNER TO postgres), or set SUPABASE_SERVICE_ROLE_KEY to the service_role secret (not the anon key).`
-            : msg
+            : msg)
       console.error('progress-photo insert:', insertError)
       return Response.json({ error: hint }, { status: 500 })
     }
