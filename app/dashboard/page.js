@@ -305,6 +305,18 @@ export default function Dashboard() {
     }
   }, [dashPW?.plansData])
   const weightLogs = useMemo(() => buildWeightLogsFromProfile(profile, dashPW?.logs), [profile, dashPW?.logs])
+  const latestProgressSessionId = useMemo(() => {
+    let bestDate = ''
+    let id = null
+    for (const p of progressPhotos) {
+      const sd = p.session?.session_date || ''
+      if (sd && sd >= bestDate) {
+        bestDate = sd
+        id = p.session_id || p.session?.id || null
+      }
+    }
+    return id
+  }, [progressPhotos])
   const loading = Boolean(dashPwKey && dashPwLoading && dashPW === undefined && !dashPwError)
 
   useEffect(() => {
@@ -384,6 +396,24 @@ export default function Dashboard() {
     await loadProgressPhotos()
     if (payload?.analysis && typeof payload.analysis === 'object') {
       await refreshWorkoutFromBodyAnalysis(payload.analysis)
+    }
+  }
+
+  async function handleDeleteProgressPhoto(photoId) {
+    try {
+      const r = await fetch(`/api/progress-photo?id=${encodeURIComponent(photoId)}`, {
+        method: 'DELETE',
+        headers: await jsonHeadersWithAuth(),
+      })
+      const d = await r.json().catch(() => ({}))
+      if (!r.ok) throw new Error(d.error || 'Could not delete photo')
+      await loadProgressPhotos()
+      setPhotoDetail(null)
+      setToast('Photo removed')
+      setTimeout(() => setToast(null), 2200)
+    } catch (e) {
+      setToast(e?.message || 'Delete failed')
+      setTimeout(() => setToast(null), 4000)
     }
   }
 
@@ -797,6 +827,7 @@ export default function Dashboard() {
           isOpen={photoModalOpen}
           onClose={() => setPhotoModalOpen(false)}
           profile={profile}
+          latestSessionId={latestProgressSessionId}
           onSaved={handleProgressPhotoSaved}
         />
         <CompareModal
@@ -810,6 +841,7 @@ export default function Dashboard() {
           photo={photoDetail}
           onClose={() => setPhotoDetail(null)}
           onCompare={progressPhotos.length >= 2 ? () => setCompareOpen(true) : undefined}
+          onDelete={handleDeleteProgressPhoto}
         />
         <TrainerModal
           open={trainerModalOpen}
@@ -1004,6 +1036,7 @@ export default function Dashboard() {
           isOpen={photoModalOpen}
           onClose={() => setPhotoModalOpen(false)}
           profile={profile}
+          latestSessionId={latestProgressSessionId}
           onSaved={handleProgressPhotoSaved}
         />
         <CompareModal
@@ -1017,6 +1050,7 @@ export default function Dashboard() {
           photo={photoDetail}
           onClose={() => setPhotoDetail(null)}
           onCompare={progressPhotos.length >= 2 ? () => setCompareOpen(true) : undefined}
+          onDelete={handleDeleteProgressPhoto}
         />
 
         <div
@@ -1434,6 +1468,7 @@ export default function Dashboard() {
         isOpen={photoModalOpen}
         onClose={() => setPhotoModalOpen(false)}
         profile={profile}
+        latestSessionId={latestProgressSessionId}
         onSaved={handleProgressPhotoSaved}
       />
       <CompareModal
@@ -1447,6 +1482,7 @@ export default function Dashboard() {
         photo={photoDetail}
         onClose={() => setPhotoDetail(null)}
         onCompare={progressPhotos.length >= 2 ? () => setCompareOpen(true) : undefined}
+        onDelete={handleDeleteProgressPhoto}
       />
 
       {/* Adjust program (free-form) */}

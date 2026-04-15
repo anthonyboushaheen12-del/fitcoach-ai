@@ -1,9 +1,12 @@
 -- FitCoach AI — RPC to insert progress_photos without relying on server service_role.
--- Use when POST /api/progress-photo runs with anon+JWT and direct INSERT is blocked by RLS.
--- Run in Supabase SQL Editor after progress_photos table exists (see supabase-progress-photos-migration.sql).
+-- Run in Supabase SQL Editor after progress_photos + progress_sessions exist.
+-- Signature includes p_session_id (required).
+
+DROP FUNCTION IF EXISTS public.insert_owned_progress_photo(uuid, text, text, jsonb, text, numeric, text, text);
 
 CREATE OR REPLACE FUNCTION public.insert_owned_progress_photo(
   p_profile_id uuid,
+  p_session_id uuid,
   p_storage_path text,
   p_image_url text,
   p_analysis jsonb,
@@ -31,11 +34,22 @@ BEGIN
     RAISE EXCEPTION 'forbidden';
   END IF;
 
-  -- Bypass RLS for this statement (ownership checks above). Needed if table has FORCE ROW LEVEL SECURITY.
+  IF p_session_id IS NULL THEN
+    RAISE EXCEPTION 'session required';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM public.progress_sessions s
+    WHERE s.id = p_session_id AND s.profile_id = p_profile_id
+  ) THEN
+    RAISE EXCEPTION 'invalid session';
+  END IF;
+
   PERFORM set_config('row_security', 'off', true);
 
   INSERT INTO public.progress_photos (
     profile_id,
+    session_id,
     storage_path,
     image_url,
     analysis,
@@ -45,6 +59,7 @@ BEGIN
     photo_type
   ) VALUES (
     p_profile_id,
+    p_session_id,
     p_storage_path,
     p_image_url,
     p_analysis,
@@ -59,15 +74,14 @@ BEGIN
 END;
 $$;
 
--- Ensures the INSERT inside this SECURITY DEFINER function bypasses RLS (owner runs as postgres).
 ALTER FUNCTION public.insert_owned_progress_photo(
-  uuid, text, text, jsonb, text, numeric, text, text
+  uuid, uuid, text, text, jsonb, text, numeric, text, text
 ) OWNER TO postgres;
 
 REVOKE ALL ON FUNCTION public.insert_owned_progress_photo(
-  uuid, text, text, jsonb, text, numeric, text, text
+  uuid, uuid, text, text, jsonb, text, numeric, text, text
 ) FROM PUBLIC;
 
 GRANT EXECUTE ON FUNCTION public.insert_owned_progress_photo(
-  uuid, text, text, jsonb, text, numeric, text, text
+  uuid, uuid, text, text, jsonb, text, numeric, text, text
 ) TO authenticated;

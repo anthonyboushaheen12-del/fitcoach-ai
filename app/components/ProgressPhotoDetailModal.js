@@ -1,5 +1,6 @@
 'use client'
 
+import { useState } from 'react'
 import ProgressMuscleAssessment from './ProgressMuscleAssessment'
 
 function ListBlock({ title, items, tone = '#A7C4B8' }) {
@@ -16,14 +17,32 @@ function ListBlock({ title, items, tone = '#A7C4B8' }) {
   )
 }
 
-export default function ProgressPhotoDetailModal({ isOpen, photo, onClose, onCompare }) {
+export default function ProgressPhotoDetailModal({ isOpen, photo, onClose, onCompare, onDelete }) {
+  const [deleteBusy, setDeleteBusy] = useState(false)
+
   if (!isOpen || !photo) return null
 
   const a = photo.analysis && typeof photo.analysis === 'object' ? photo.analysis : null
   const bf = photo.body_fat_estimate || a?.bodyFatEstimate || ''
   const dateStr = photo.created_at
-    ? new Date(photo.created_at).toLocaleDateString('en', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })
+    ? new Date(photo.created_at).toLocaleDateString('en', {
+        weekday: 'short',
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+      })
     : ''
+
+  async function handleDelete() {
+    if (!onDelete || !photo?.id) return
+    if (!window.confirm('Remove this photo from your check-in? This cannot be undone.')) return
+    setDeleteBusy(true)
+    try {
+      await onDelete(photo.id)
+    } finally {
+      setDeleteBusy(false)
+    }
+  }
 
   return (
     <div
@@ -65,23 +84,38 @@ export default function ProgressPhotoDetailModal({ isOpen, photo, onClose, onCom
             style={{ background: 'none', border: 'none', color: '#2D5B3F', fontSize: 22, lineHeight: 1, cursor: 'pointer' }}
             aria-label="Close"
           >
-            ✕
+            ×
           </button>
         </div>
 
         {photo.signedUrl && (
-          <img
-            src={photo.signedUrl}
-            alt=""
+          <div
             style={{
               width: '100%',
-              maxHeight: 220,
-              objectFit: 'cover',
+              maxHeight: 'min(52vh, 480px)',
               borderRadius: 14,
+              background: 'rgba(0,0,0,0.35)',
               border: '1px solid rgba(110,231,183,0.12)',
               marginBottom: 14,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              overflow: 'hidden',
             }}
-          />
+          >
+            <img
+              src={photo.signedUrl}
+              alt=""
+              style={{
+                maxWidth: '100%',
+                maxHeight: 'min(52vh, 480px)',
+                width: 'auto',
+                height: 'auto',
+                objectFit: 'contain',
+                display: 'block',
+              }}
+            />
+          </div>
         )}
 
         {photo.weight_at_time != null && (
@@ -126,6 +160,28 @@ export default function ProgressPhotoDetailModal({ isOpen, photo, onClose, onCom
           <div style={{ fontSize: 13, color: '#4A6B58' }}>No detailed analysis stored for this photo.</div>
         )}
 
+        {onDelete ? (
+          <button
+            type="button"
+            disabled={deleteBusy}
+            onClick={handleDelete}
+            style={{
+              width: '100%',
+              marginTop: 16,
+              padding: 12,
+              borderRadius: 12,
+              border: '1px solid rgba(251,113,133,0.35)',
+              background: 'rgba(251,113,133,0.08)',
+              color: '#FB7185',
+              fontSize: 14,
+              fontWeight: 700,
+              cursor: deleteBusy ? 'wait' : 'pointer',
+            }}
+          >
+            {deleteBusy ? 'Removing…' : 'Remove this photo'}
+          </button>
+        ) : null}
+
         {onCompare && (
           <button
             type="button"
@@ -135,7 +191,7 @@ export default function ProgressPhotoDetailModal({ isOpen, photo, onClose, onCom
             }}
             style={{
               width: '100%',
-              marginTop: 18,
+              marginTop: 12,
               padding: 14,
               borderRadius: 14,
               border: '1px solid rgba(110,231,183,0.25)',

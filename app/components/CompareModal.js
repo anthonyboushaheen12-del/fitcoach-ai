@@ -107,21 +107,37 @@ export default function CompareModal({ isOpen, onClose, photos, profile }) {
             <div key={label}>
               <div style={{ fontSize: 11, color: '#6EE7B7', marginBottom: 6, fontWeight: 600 }}>{label}</div>
               {row?.signedUrl ? (
-                <img
-                  src={row.signedUrl}
-                  alt=""
+                <div
                   style={{
                     width: '100%',
-                    aspectRatio: '3/4',
-                    objectFit: 'cover',
+                    maxHeight: 320,
+                    minHeight: 160,
                     borderRadius: 14,
+                    background: 'rgba(0,0,0,0.35)',
                     border: '1px solid rgba(110,231,183,0.12)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    overflow: 'hidden',
                   }}
-                />
+                >
+                  <img
+                    src={row.signedUrl}
+                    alt=""
+                    style={{
+                      maxWidth: '100%',
+                      maxHeight: 320,
+                      width: 'auto',
+                      height: 'auto',
+                      objectFit: 'contain',
+                      display: 'block',
+                    }}
+                  />
+                </div>
               ) : (
                 <div
                   style={{
-                    aspectRatio: '3/4',
+                    minHeight: 160,
                     borderRadius: 14,
                     background: 'rgba(14,20,14,0.6)',
                     display: 'flex',

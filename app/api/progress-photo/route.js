@@ -22,6 +22,7 @@ function normalizeRpcProgressPhotoRow(data) {
 async function rpcInsertProgressPhoto(userSb, row) {
   const rpc = await userSb.rpc('insert_owned_progress_photo', {
     p_profile_id: row.profile_id,
+    p_session_id: row.session_id,
     p_storage_path: row.storage_path,
     p_image_url: row.image_url,
     p_analysis: row.analysis,
@@ -40,7 +41,6 @@ async function insertProgressPhotoRow(userSb, serviceSb, row) {
     if (!ins.error) {
       return { data: ins.data, error: null, path: 'service_insert' }
     }
-    // Invalid/pasted anon key as "service role" still enforces RLS — fall back to RPC.
     if (isRlsPolicyError(ins.error)) {
       console.warn('progress-photo: service-role insert hit RLS, falling back to RPC')
       const rpc = await rpcInsertProgressPhoto(userSb, row)
@@ -49,7 +49,6 @@ async function insertProgressPhotoRow(userSb, serviceSb, row) {
     return { data: ins.data, error: ins.error, path: 'service_insert' }
   }
 
-  // No service role: try normal authenticated INSERT first (JWT + anon client).
   const direct = await userSb.from('progress_photos').insert(row).select().single()
   if (!direct.error) {
     return { data: direct.data, error: null, path: 'user_direct' }
@@ -64,44 +63,47 @@ async function insertProgressPhotoRow(userSb, serviceSb, row) {
   return { data: rpc.data, error: rpc.error, path: 'rpc_after_user_rls' }
 }
 
-/**
- * Keep only baseline (earliest) + latest photo for a profile; remove others from Storage + DB.
- * Uses service role when available; otherwise user JWT (requires progress_photos_delete_own + storage delete policy).
- */
-async function trimProgressPhotosToBaselineAndLatest(trimClient, profileId) {
-  if (!trimClient || !profileId) return
+function attachSessionsToPhotos(rows, sessions) {
+  const map = Object.fromEntries((sessions || []).map((s) => [s.id, s]))
+  return (rows || []).map((row) => ({
+    ...row,
+    session: row.session_id ? map[row.session_id] ?? null : null,
+  }))
+}
 
-  const { data: rows, error: selErr } = await trimClient
-    .from('progress_photos')
-    .select('id, storage_path')
-    .eq('profile_id', profileId)
-    .order('created_at', { ascending: true })
-    .order('id', { ascending: true })
-
-  if (selErr) {
-    console.error('progress-photo trim: select failed', selErr)
-    return
+async function ensureSessionForUpload(userSb, serviceSb, profileId, body) {
+  const db = serviceSb || userSb
+  const incoming = body.sessionId
+  if (incoming) {
+    const q = await db
+      .from('progress_sessions')
+      .select('id, profile_id, session_date, label, notes')
+      .eq('id', incoming)
+      .maybeSingle()
+    if (q.error || !q.data || q.data.profile_id !== profileId) {
+      return { error: 'Invalid check-in. Start a new check-in or pick the latest visit.', session: null }
+    }
+    return { error: null, session: q.data }
   }
-
-  const list = rows || []
-  if (list.length <= 2) return
-
-  const first = list[0]
-  const last = list[list.length - 1]
-  const keep = new Set([first.id, last.id])
-  const toRemove = list.filter((r) => !keep.has(r.id))
-  const paths = toRemove.map((r) => r.storage_path).filter(Boolean)
-
-  if (paths.length) {
-    const { error: rmErr } = await trimClient.storage.from(BUCKET).remove(paths)
-    if (rmErr) console.error('progress-photo trim: storage remove', rmErr)
+  const rawDate = body.sessionDate
+  const date =
+    typeof rawDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(rawDate.trim())
+      ? rawDate.trim()
+      : new Date().toISOString().split('T')[0]
+  const label = typeof body.sessionLabel === 'string' && body.sessionLabel.trim() ? body.sessionLabel.trim() : null
+  const ins = await db
+    .from('progress_sessions')
+    .insert({
+      profile_id: profileId,
+      session_date: date,
+      label,
+    })
+    .select()
+    .single()
+  if (ins.error) {
+    return { error: ins.error.message || 'Could not create check-in', session: null }
   }
-
-  const ids = toRemove.map((r) => r.id)
-  if (!ids.length) return
-
-  const { error: delErr } = await trimClient.from('progress_photos').delete().in('id', ids)
-  if (delErr) console.error('progress-photo trim: delete rows', delErr)
+  return { error: null, session: ins.data }
 }
 
 export async function GET(request) {
@@ -118,6 +120,16 @@ export async function GET(request) {
     return Response.json({ error: 'profileId required' }, { status: 400 })
   }
 
+  const { data: sessions, error: sessErr } = await supabase
+    .from('progress_sessions')
+    .select('id, profile_id, session_date, label, notes, merged_analysis, created_at')
+    .eq('profile_id', profileId)
+    .order('session_date', { ascending: false })
+
+  if (sessErr) {
+    return Response.json({ error: sessErr.message }, { status: 500 })
+  }
+
   const { data: rows, error } = await supabase
     .from('progress_photos')
     .select('*')
@@ -128,8 +140,10 @@ export async function GET(request) {
     return Response.json({ error: error.message }, { status: 500 })
   }
 
+  const withSessions = attachSessionsToPhotos(rows, sessions)
+
   const photos = await Promise.all(
-    (rows || []).map(async (row) => {
+    withSessions.map(async (row) => {
       if (!row.storage_path) {
         return { ...row, signedUrl: null }
       }
@@ -143,7 +157,73 @@ export async function GET(request) {
     })
   )
 
-  return Response.json({ photos })
+  return Response.json({ photos, sessions: sessions || [] })
+}
+
+export async function DELETE(request) {
+  const token = getBearerToken(request)
+  if (!token) {
+    return Response.json({ error: 'Not authenticated' }, { status: 401 })
+  }
+
+  let userSb
+  try {
+    userSb = createSupabaseUserJwtClient(token)
+  } catch (e) {
+    return Response.json({ error: e.message }, { status: 500 })
+  }
+
+  const id = new URL(request.url).searchParams.get('id')
+  if (!id) {
+    return Response.json({ error: 'id required' }, { status: 400 })
+  }
+
+  const {
+    data: { user },
+    error: userErr,
+  } = await userSb.auth.getUser(token)
+  if (userErr || !user?.id) {
+    return Response.json({ error: 'Not authenticated' }, { status: 401 })
+  }
+
+  const { data: ownedProfile, error: profileLookupErr } = await userSb
+    .from('profiles')
+    .select('id')
+    .eq('user_id', user.id)
+    .maybeSingle()
+
+  if (profileLookupErr || !ownedProfile?.id) {
+    return Response.json({ error: 'Could not verify profile' }, { status: 403 })
+  }
+
+  const serviceSb = createSupabaseServiceRoleClient()
+  const db = serviceSb || userSb
+
+  const { data: row, error: selErr } = await db
+    .from('progress_photos')
+    .select('id, storage_path, profile_id')
+    .eq('id', id)
+    .maybeSingle()
+
+  if (selErr || !row) {
+    return Response.json({ error: 'Photo not found' }, { status: 404 })
+  }
+  if (row.profile_id !== ownedProfile.id) {
+    return Response.json({ error: 'Forbidden' }, { status: 403 })
+  }
+
+  if (row.storage_path) {
+    const { error: rmErr } = await db.storage.from(BUCKET).remove([row.storage_path])
+    if (rmErr) console.error('progress-photo DELETE storage:', rmErr)
+  }
+
+  const { error: delErr } = await db.from('progress_photos').delete().eq('id', id)
+  if (delErr) {
+    console.error('progress-photo DELETE:', delErr)
+    return Response.json({ error: delErr.message }, { status: 500 })
+  }
+
+  return Response.json({ success: true })
 }
 
 export async function POST(request) {
@@ -209,6 +289,13 @@ export async function POST(request) {
     const effectiveProfileId = ownedProfile.id
     const uid = user.id
     const storageClient = serviceSb || userSb
+
+    const sessionOutcome = await ensureSessionForUpload(userSb, serviceSb, effectiveProfileId, body)
+    if (sessionOutcome.error) {
+      return Response.json({ error: sessionOutcome.error }, { status: 400 })
+    }
+    const session = sessionOutcome.session
+
     const fileName = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}.jpg`
     const storagePath = `${uid}/${effectiveProfileId}/${fileName}`
 
@@ -230,6 +317,7 @@ export async function POST(request) {
 
     const row = {
       profile_id: effectiveProfileId,
+      session_id: session.id,
       storage_path: storagePath,
       image_url: null,
       analysis,
@@ -249,8 +337,9 @@ export async function POST(request) {
       const hint =
         lower.includes('insert_owned_progress_photo') ||
         lower.includes('does not exist') ||
-        lower.includes('42883')
-          ? 'Database function missing: run supabase-progress-photo-rpc.sql in Supabase SQL Editor (include ALTER FUNCTION ... OWNER TO postgres), or set the real service_role key in Vercel.'
+        lower.includes('42883') ||
+        lower.includes('session_id')
+          ? 'Database may need migration: run supabase-progress-sessions-migration.sql and supabase-progress-photo-rpc.sql in Supabase, and set SUPABASE_SERVICE_ROLE_KEY if inserts fail.'
           : isRlsPolicyError(insertError)
             ? `${msg} Fix: run supabase-progress-photo-rpc.sql in Supabase (ALTER FUNCTION ... OWNER TO postgres), or set SUPABASE_SERVICE_ROLE_KEY to the service_role secret (not the anon key).`
             : msg
@@ -270,17 +359,11 @@ export async function POST(request) {
       )
     }
 
-    const trimClient = serviceSb || userSb
-    if (!serviceSb) {
-      console.warn(
-        'progress-photo: SUPABASE_SERVICE_ROLE_KEY missing; trimming via user JWT (delete RLS + storage policies must allow it)'
-      )
-    }
-    await trimProgressPhotosToBaselineAndLatest(trimClient, effectiveProfileId)
-
     return Response.json({
       success: true,
-      photo: { ...inserted, signedUrl: signed?.signedUrl ?? null },
+      sessionId: session.id,
+      session,
+      photo: { ...inserted, signedUrl: signed?.signedUrl ?? null, session },
     })
   } catch (e) {
     console.error('progress-photo POST:', e)

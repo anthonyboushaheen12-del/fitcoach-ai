@@ -7,13 +7,15 @@ import { compressImageForUpload } from '../../lib/image-compress'
 async function jsonHeadersWithAuth() {
   const headers = { 'Content-Type': 'application/json' }
   if (supabase) {
-    const { data: { session } } = await supabase.auth.getSession()
+    const {
+      data: { session },
+    } = await supabase.auth.getSession()
     if (session?.access_token) headers.Authorization = `Bearer ${session.access_token}`
   }
   return headers
 }
 
-export default function PhotoUploadModal({ isOpen, onClose, profile, onSaved }) {
+export default function PhotoUploadModal({ isOpen, onClose, profile, onSaved, latestSessionId = null }) {
   const [photoType, setPhotoType] = useState('front')
   const [notes, setNotes] = useState('')
   const [weight, setWeight] = useState(profile?.weight_kg ?? '')
@@ -21,6 +23,7 @@ export default function PhotoUploadModal({ isOpen, onClose, profile, onSaved }) 
   const [error, setError] = useState('')
   const [justSaved, setJustSaved] = useState(false)
   const [batchHint, setBatchHint] = useState('')
+  const [addToLatestVisit, setAddToLatestVisit] = useState(false)
   const inputRef = useRef(null)
 
   useEffect(() => {
@@ -29,6 +32,7 @@ export default function PhotoUploadModal({ isOpen, onClose, profile, onSaved }) 
     setError('')
     setBatchHint('')
     setWeight(profile.weight_kg ?? '')
+    setAddToLatestVisit(false)
   }, [isOpen, profile?.id, profile?.weight_kg])
 
   if (!isOpen || !profile?.id) return null
@@ -45,6 +49,10 @@ export default function PhotoUploadModal({ isOpen, onClose, profile, onSaved }) 
     let saved = 0
     let lastAnalysis = null
     const failures = []
+
+    const useLatest = Boolean(addToLatestVisit && latestSessionId)
+    let batchSessionId = useLatest ? latestSessionId : null
+
     try {
       for (let i = 0; i < files.length; i++) {
         if (files.length > 1) {
@@ -60,21 +68,27 @@ export default function PhotoUploadModal({ isOpen, onClose, profile, onSaved }) 
           const analysisPayload = await ar.json().catch(() => ({}))
           const analysis = analysisPayload.analysis || analysisPayload
 
+          const body = {
+            profileId: profile.id,
+            imageBase64: base64,
+            analysis,
+            weightAtTime: wVal,
+            notes: notesVal,
+            photoType,
+          }
+          if (batchSessionId) body.sessionId = batchSessionId
+
           const pr = await fetch('/api/progress-photo', {
             method: 'POST',
             headers: await jsonHeadersWithAuth(),
-            body: JSON.stringify({
-              profileId: profile.id,
-              imageBase64: base64,
-              analysis,
-              weightAtTime: wVal,
-              notes: notesVal,
-              photoType,
-            }),
+            body: JSON.stringify(body),
           })
+          const payload = await pr.json().catch(() => ({}))
           if (!pr.ok) {
-            const err = await pr.json().catch(() => ({}))
-            throw new Error(err.error || 'Save failed')
+            throw new Error(payload.error || 'Save failed')
+          }
+          if (payload.sessionId && !batchSessionId) {
+            batchSessionId = payload.sessionId
           }
           lastAnalysis = analysis
           saved++
@@ -89,9 +103,7 @@ export default function PhotoUploadModal({ isOpen, onClose, profile, onSaved }) 
       }
       if (failures.length) {
         const suffix =
-          saved > 0
-            ? ` Saved ${saved}, failed: ${failures.join(' · ')}`
-            : ` ${failures.join(' · ')}`
+          saved > 0 ? ` Saved ${saved}, failed: ${failures.join(' · ')}` : ` ${failures.join(' · ')}`
         setError(saved > 0 ? `${failures.length} photo(s) could not save.${suffix}` : failures.join(' · '))
         if (saved > 0) setJustSaved(true)
       } else {
@@ -145,9 +157,31 @@ export default function PhotoUploadModal({ isOpen, onClose, profile, onSaved }) 
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
           <div style={{ fontSize: 17, fontWeight: 700, color: '#fff' }}>Progress photo</div>
           <button type="button" onClick={onClose} style={{ background: 'none', border: 'none', color: '#2D5B3F', fontSize: 20 }}>
-            ✕
+            ×
           </button>
         </div>
+
+        {latestSessionId ? (
+          <label
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 10,
+              marginBottom: 14,
+              cursor: 'pointer',
+              fontSize: 12,
+              color: '#A7C4B8',
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={addToLatestVisit}
+              onChange={(e) => setAddToLatestVisit(e.target.checked)}
+            />
+            <span>Add to latest check-in (same visit as your most recent date)</span>
+          </label>
+        ) : null}
+
         <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
           {['front', 'side', 'back'].map((t) => (
             <button
@@ -233,7 +267,7 @@ export default function PhotoUploadModal({ isOpen, onClose, profile, onSaved }) 
                 marginBottom: 12,
               }}
             >
-              Saved. You can add as many progress photos as you like.
+              Saved. Photos are grouped by check-in; start a new visit anytime.
             </div>
             <button
               type="button"
