@@ -64,6 +64,46 @@ async function insertProgressPhotoRow(userSb, serviceSb, row) {
   return { data: rpc.data, error: rpc.error, path: 'rpc_after_user_rls' }
 }
 
+/**
+ * Keep only baseline (earliest) + latest photo for a profile; remove others from Storage + DB.
+ * Uses service role when available; otherwise user JWT (requires progress_photos_delete_own + storage delete policy).
+ */
+async function trimProgressPhotosToBaselineAndLatest(trimClient, profileId) {
+  if (!trimClient || !profileId) return
+
+  const { data: rows, error: selErr } = await trimClient
+    .from('progress_photos')
+    .select('id, storage_path')
+    .eq('profile_id', profileId)
+    .order('created_at', { ascending: true })
+    .order('id', { ascending: true })
+
+  if (selErr) {
+    console.error('progress-photo trim: select failed', selErr)
+    return
+  }
+
+  const list = rows || []
+  if (list.length <= 2) return
+
+  const first = list[0]
+  const last = list[list.length - 1]
+  const keep = new Set([first.id, last.id])
+  const toRemove = list.filter((r) => !keep.has(r.id))
+  const paths = toRemove.map((r) => r.storage_path).filter(Boolean)
+
+  if (paths.length) {
+    const { error: rmErr } = await trimClient.storage.from(BUCKET).remove(paths)
+    if (rmErr) console.error('progress-photo trim: storage remove', rmErr)
+  }
+
+  const ids = toRemove.map((r) => r.id)
+  if (!ids.length) return
+
+  const { error: delErr } = await trimClient.from('progress_photos').delete().in('id', ids)
+  if (delErr) console.error('progress-photo trim: delete rows', delErr)
+}
+
 export async function GET(request) {
   let supabase
   try {
@@ -229,6 +269,14 @@ export async function POST(request) {
         { status: 500 }
       )
     }
+
+    const trimClient = serviceSb || userSb
+    if (!serviceSb) {
+      console.warn(
+        'progress-photo: SUPABASE_SERVICE_ROLE_KEY missing; trimming via user JWT (delete RLS + storage policies must allow it)'
+      )
+    }
+    await trimProgressPhotosToBaselineAndLatest(trimClient, effectiveProfileId)
 
     return Response.json({
       success: true,
