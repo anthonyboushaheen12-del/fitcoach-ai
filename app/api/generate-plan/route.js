@@ -2,6 +2,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import { getTrainer, buildSystemPrompt, buildOnboardingContextPrompt } from '../../../lib/trainers'
 import { createSupabaseRouteClient } from '../../../lib/supabase-api-route'
 import { computeNutritionTargets } from '../../../lib/nutrition-targets'
+import { alignMealPlanToTargets } from '../../../lib/align-meal-plan-to-targets'
 
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY || '',
@@ -426,9 +427,10 @@ Return ONLY a JSON object in this exact format:
     {"name": "Lunch", "description": "Chicken breast + rice", "calories": 650, "protein": 45},
     {"name": "Snack", "description": "Greek yogurt + banana", "calories": 280, "protein": 20},
     {"name": "Dinner", "description": "Salmon + sweet potato", "calories": 580, "protein": 38}
-  ]
+   ]
 }
-Calculate appropriate calories and macros. Keep meals simple and practical.`,
+Calculate appropriate calories and macros. Keep meals simple and practical.
+Meal calorie numbers should sum to about ${targets.calories} kcal (±50); they will be aligned to the nutrition targets automatically.`,
           }],
         })
 
@@ -451,6 +453,8 @@ Calculate appropriate calories and macros. Keep meals simple and practical.`,
             ],
           }
         }
+
+        mealPlan = alignMealPlanToTargets(mealPlan, targets).mealPlan
 
         const { error: insMErr } = await supabase.from('plans').insert({
           profile_id: profileId,

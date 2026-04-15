@@ -5,6 +5,10 @@ import {
   buildOnboardingContextPrompt,
 } from '../../../lib/trainers'
 import { createSupabaseRouteClient } from '../../../lib/supabase-api-route'
+import {
+  alignMealPlanToTargets,
+  targetsFromGoalPlan,
+} from '../../../lib/align-meal-plan-to-targets'
 
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY || '',
@@ -246,6 +250,13 @@ You are an expert fitness coach and nutritionist. Output ONLY the JSON object â€
         },
         { status: 422 }
       )
+    }
+
+    if (plan?.nutrition && typeof plan.nutrition === 'object' && plan?.goalSummary) {
+      const gTargets = targetsFromGoalPlan(plan.goalSummary, plan.nutrition)
+      if (gTargets) {
+        plan.nutrition = alignMealPlanToTargets(plan.nutrition, gTargets).mealPlan
+      }
     }
 
     if (replaceConfirmed && existingActive) {

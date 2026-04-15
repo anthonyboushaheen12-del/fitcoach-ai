@@ -65,6 +65,8 @@ export default function FoodLogModal({ open, onClose, profileId, onLog }) {
   const [describeText, setDescribeText] = useState('')
   const [describeBusy, setDescribeBusy] = useState(false)
   const [describeHint, setDescribeHint] = useState(null)
+  /** Last AI aggregate from photo or text analysis (for comparison with line-item totals). */
+  const [analysisTotals, setAnalysisTotals] = useState(null)
 
   const debouncedSearch = useDebounce(search, 300)
 
@@ -75,6 +77,7 @@ export default function FoodLogModal({ open, onClose, profileId, onLog }) {
       setDescribeBusy(false)
       setDescribeHint(null)
       setDescribeText('')
+      setAnalysisTotals(null)
     }
   }, [open])
 
@@ -131,12 +134,20 @@ export default function FoodLogModal({ open, onClose, profileId, onLog }) {
       }
       if (items.length === 0) {
         setPhotoHint(typeof a?.notes === 'string' ? a.notes : 'No foods detected — try a clearer photo.')
+        setAnalysisTotals(null)
       } else {
         setPhotoHint(
           a?.mealLabel
             ? `${a.mealLabel} · estimates only`
             : 'Added from photo (estimates — adjust grams if needed).'
         )
+        setAnalysisTotals({
+          source: 'photo',
+          calories: Number(a?.totalCalories),
+          protein: Number(a?.totalProteinG),
+          carbs: Number(a?.totalCarbsG),
+          fats: Number(a?.totalFatsG),
+        })
       }
     } catch {
       setPhotoHint('Could not analyze photo.')
@@ -165,12 +176,20 @@ export default function FoodLogModal({ open, onClose, profileId, onLog }) {
       }
       if (items.length === 0) {
         setDescribeHint(typeof a?.notes === 'string' ? a.notes : 'No foods parsed — try listing items more clearly.')
+        setAnalysisTotals(null)
       } else {
         setDescribeHint(
           a?.mealLabel
             ? `${a.mealLabel} · estimates only`
             : 'Added from description (estimates — adjust grams if needed).'
         )
+        setAnalysisTotals({
+          source: 'text',
+          calories: Number(a?.totalCalories),
+          protein: Number(a?.totalProteinG),
+          carbs: Number(a?.totalCarbsG),
+          fats: Number(a?.totalFatsG),
+        })
         setDescribeText('')
       }
     } catch {
@@ -342,11 +361,42 @@ export default function FoodLogModal({ open, onClose, profileId, onLog }) {
               disabled={photoBusy}
               onChange={handleMealPhotoChange}
             />
-            {photoBusy ? 'Analyzing plate photo...' : 'Scan meal from photo'}
+            {photoBusy ? 'Analyzing photo...' : 'Scan or upload meal photo'}
           </label>
           {photoHint && (
             <div style={{ fontSize: 12, color: '#A7C4B8', marginBottom: 12, lineHeight: 1.45 }}>{photoHint}</div>
           )}
+          {analysisTotals &&
+            [analysisTotals.calories, analysisTotals.protein, analysisTotals.carbs, analysisTotals.fats].some((n) =>
+              Number.isFinite(n)
+            ) && (
+              <div
+                style={{
+                  fontSize: 12,
+                  color: '#6EE7B7',
+                  marginBottom: 12,
+                  padding: '10px 12px',
+                  borderRadius: 12,
+                  background: 'rgba(16,185,129,0.12)',
+                  border: '1px solid rgba(110,231,183,0.25)',
+                  lineHeight: 1.5,
+                }}
+              >
+                <strong style={{ color: '#D1FAE5' }}>AI estimate</strong>
+                {analysisTotals.source === 'photo' ? ' (photo)' : ' (description)'}:{' '}
+                {[
+                  Number.isFinite(analysisTotals.calories) ? `${Math.round(analysisTotals.calories)} cal` : null,
+                  Number.isFinite(analysisTotals.protein) ? `${analysisTotals.protein}g P` : null,
+                  Number.isFinite(analysisTotals.carbs) ? `${analysisTotals.carbs}g C` : null,
+                  Number.isFinite(analysisTotals.fats) ? `${analysisTotals.fats}g F` : null,
+                ]
+                  .filter(Boolean)
+                  .join(' · ')}
+                <span style={{ color: '#A7C4B8', display: 'block', marginTop: 4, fontSize: 11 }}>
+                  Line items below may differ slightly after rounding; adjust grams as needed.
+                </span>
+              </div>
+            )}
 
           <div style={{ marginBottom: 12 }}>
             <label
@@ -403,7 +453,9 @@ export default function FoodLogModal({ open, onClose, profileId, onLog }) {
               {describeBusy ? 'Parsing…' : 'Add from description'}
             </button>
             {describeHint && (
-              <div style={{ fontSize: 12, color: '#A7C4B8', marginTop: 10, lineHeight: 1.45 }}>{describeHint}</div>
+              <div style={{ fontSize: 12, color: '#A7C4B8', marginTop: 10, lineHeight: 1.45 }}>
+                {describeHint}
+              </div>
             )}
           </div>
 
@@ -499,6 +551,8 @@ export default function FoodLogModal({ open, onClose, profileId, onLog }) {
                 const ratio = s.grams / 100
                 const cal = Math.round((s.per100g?.calories || 0) * ratio)
                 const prot = ((s.per100g?.protein || 0) * ratio).toFixed(1)
+                const carb = ((s.per100g?.carbs || 0) * ratio).toFixed(1)
+                const fat = ((s.per100g?.fats || 0) * ratio).toFixed(1)
                 return (
                   <div
                     key={i}
@@ -532,7 +586,9 @@ export default function FoodLogModal({ open, onClose, profileId, onLog }) {
                       />
                       <span style={{ fontSize: 11, color: '#2D5B3F', marginLeft: 4 }}>g</span>
                     </div>
-                    <div style={{ fontSize: 12, color: '#6EE7B7', fontWeight: 600 }}>{cal} cal · {prot}g P</div>
+                    <div style={{ fontSize: 12, color: '#6EE7B7', fontWeight: 600 }}>
+                      {cal} cal · {prot}g P · {carb}g C · {fat}g F
+                    </div>
                     <button
                       onClick={() => removeFood(i)}
                       style={{
