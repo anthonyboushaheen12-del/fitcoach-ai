@@ -97,39 +97,42 @@ export function AuthProvider({ children }) {
         }
 
         let u = null
+        // Reload path: session is usually in localStorage — getSession is much faster than getUser (network).
         try {
-          const { data } = await race(supabase.auth.getUser(), AUTH_INIT_MS, 'getUser')
-          u = data?.user ?? null
-        } catch (e) {
-          console.warn('Auth getUser slow or failed, trying getSession:', e?.message)
-          try {
-            const { data: sess } = await race(
-              supabase.auth.getSession(),
-              AUTH_INIT_MS,
-              'getSession'
-            )
-            u = sess?.session?.user ?? null
-          } catch {
-            u = null
-          }
+          const { data: sessFast } = await race(
+            supabase.auth.getSession(),
+            5000,
+            'getSession'
+          )
+          u = sessFast?.session?.user ?? null
+        } catch {
+          u = null
         }
         if (!u) {
           try {
-            const { data: sess2 } = await Promise.race([
-              supabase.auth.getSession(),
-              new Promise((_, reject) =>
-                setTimeout(() => reject(new Error('getSession final timeout')), 5000)
-              ),
-            ])
-            u = sess2?.session?.user ?? null
-          } catch {
-            // leave u null
+            const { data } = await race(supabase.auth.getUser(), AUTH_INIT_MS, 'getUser')
+            u = data?.user ?? null
+          } catch (e) {
+            console.warn('Auth getUser slow or failed, retrying getSession:', e?.message)
+            try {
+              const { data: sess } = await race(
+                supabase.auth.getSession(),
+                5000,
+                'getSession'
+              )
+              u = sess?.session?.user ?? null
+            } catch {
+              u = null
+            }
           }
         }
         if (cancelled) return
         setUser(u || null)
         if (u) {
+          const cached = readCachedProfileForUser(u.id)
+          if (cached) setProfile(cached)
           setProfileLoading(true)
+          setLoading(false)
           try {
             const p = await fetchProfile(u.id)
             if (cancelled) return
@@ -143,7 +146,7 @@ export function AuthProvider({ children }) {
               localStorage.removeItem('profile')
             }
           } finally {
-            setProfileLoading(false)
+            if (!cancelled) setProfileLoading(false)
           }
         } else {
           setProfile(null)
@@ -172,7 +175,11 @@ export function AuthProvider({ children }) {
       setUser(u)
       if (u) {
         const isTokenRefresh = event === 'TOKEN_REFRESHED'
-        if (!isTokenRefresh) setProfileLoading(true)
+        if (!isTokenRefresh) {
+          const cached = readCachedProfileForUser(u.id)
+          if (cached) setProfile(cached)
+          setProfileLoading(true)
+        }
         try {
           const p = await fetchProfile(u.id)
           const merged = p ?? readCachedProfileForUser(u.id)

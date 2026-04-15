@@ -290,7 +290,11 @@ export default function Dashboard() {
   const { data: dashPW, mutate: mutateDashPw, isLoading: dashPwLoading, error: dashPwError } = useSWR(
     dashPwKey,
     fetchDashboardPlansWeight,
-    { keepPreviousData: true, revalidateOnFocus: true }
+    {
+      keepPreviousData: true,
+      revalidateOnFocus: false,
+      dedupingInterval: 5000,
+    }
   )
   const plans = useMemo(() => {
     const rows = dashPW?.plansData
