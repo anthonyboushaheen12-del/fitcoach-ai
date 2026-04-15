@@ -1,0 +1,21 @@
+---
+description: Auto commit and push after implementation — no need for user to ask
+alwaysApply: true
+---
+
+# Auto commit and push (agent)
+
+When you **finish implementation work** in this workspace (code changes, fixes, features, refactors that the user requested), **do not wait** for the user to say "push" or "commit".
+
+**Unless** the user explicitly asked you not to commit, or there is nothing to commit:
+
+1. Run `git status` from this repository root (this `fitcoach-ai` folder).
+2. Stage the changed files (avoid unrelated files).
+3. `git commit` with a clear message (what changed and why).
+4. `git push` to the current branch (typically `origin/main`).
+
+If a **post-commit hook** is installed (`npm run setup:autopush`), `git push` may already run after commit; running `git push` again is harmless.
+
+**Skip** auto commit/push when: the user is only asking questions, you are in read-only/plan mode, the task was exploratory with no file edits, or there are no meaningful changes.
+
+After **`npm run build`** succeeds as part of delivering work, commit and push if there are changes to tracked files (build output under `.next` stays ignored).

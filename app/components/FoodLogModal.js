@@ -319,7 +319,7 @@ export default function FoodLogModal({ open, onClose, profileId, onLog }) {
             </button>
           </div>
 
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
             {MEAL_TYPES.map((m) => (
               <button
                 key={m.id}
@@ -339,6 +339,23 @@ export default function FoodLogModal({ open, onClose, profileId, onLog }) {
             ))}
           </div>
 
+          <p style={{ fontSize: 13, color: '#A7C4B8', lineHeight: 1.5, marginBottom: 14 }}>
+            <strong style={{ color: '#D1FAE5' }}>Smart add:</strong> use a photo or a short description — we&apos;ll
+            analyze and estimate macros (you can edit grams before logging).
+          </p>
+
+          <div
+            style={{
+              border: '1px solid rgba(110,231,183,0.2)',
+              borderRadius: 16,
+              padding: 14,
+              marginBottom: 16,
+              background: 'rgba(14,20,14,0.45)',
+            }}
+          >
+            <div style={{ fontSize: 10, color: '#2D5B3F', fontWeight: 700, letterSpacing: 0.5, marginBottom: 10 }}>
+              PHOTO OR TEXT
+            </div>
           <label
             style={{
               display: 'block',
@@ -457,6 +474,18 @@ export default function FoodLogModal({ open, onClose, profileId, onLog }) {
                 {describeHint}
               </div>
             )}
+          </div>
+          </div>
+
+          <div
+            style={{
+              height: 1,
+              background: 'rgba(110,231,183,0.12)',
+              marginBottom: 14,
+            }}
+          />
+          <div style={{ fontSize: 10, color: '#2D5B3F', fontWeight: 700, letterSpacing: 0.5, marginBottom: 8 }}>
+            OR ADD MANUALLY
           </div>
 
           <div

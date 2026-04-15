@@ -8,7 +8,8 @@
     "start": "next start",
     "test": "vitest run",
     "lint": "eslint",
-    "setup:autopush": "powershell -ExecutionPolicy Bypass -File scripts/install-autopush.ps1"
+    "setup:autopush": "powershell -ExecutionPolicy Bypass -File scripts/install-autopush.ps1",
+    "verify": "npm run lint && npm run test && npm run build"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.78.0",

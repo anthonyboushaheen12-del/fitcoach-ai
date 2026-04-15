@@ -35,6 +35,14 @@ The easiest way to deploy your Next.js app is to use the [Vercel Platform](https
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
 
+## Git workflow
+
+- **`npm run verify`** — lint, tests, and production build.
+- **`npm run setup:autopush`** (once) — installs a post-commit hook that runs `git push` after every commit.
+- **`scripts/commit-and-push.ps1 -Message "…"`** — stage all, commit, and push (PowerShell).
+
+Cursor agents working in this repo are configured to **commit and push** when implementation tasks finish, unless you ask otherwise.
+
 ### Supabase environment variables (production)
 
 Add the same variables you use locally (`NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`).

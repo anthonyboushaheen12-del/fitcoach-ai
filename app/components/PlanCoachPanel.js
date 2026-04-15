@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { supabase } from '../../lib/supabase'
+import { mealPlanAuthoritativeSummary } from '../../lib/meal-plan-summary'
 
 async function jsonHeadersWithAuth() {
   const headers = { 'Content-Type': 'application/json' }
@@ -78,6 +79,7 @@ export default function PlanCoachPanel({
           history,
           workoutExcerpt: excerptPlan(activeWorkoutContent),
           mealExcerpt: excerptPlan(activeMealContent),
+          mealTargetsSummary: mealPlanAuthoritativeSummary(activeMealContent),
         }),
       })
       const data = await res.json().catch(() => ({}))
