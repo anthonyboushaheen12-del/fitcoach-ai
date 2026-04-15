@@ -6,11 +6,19 @@ import { compressImageForUpload } from '../../lib/image-compress'
 
 async function jsonHeadersWithAuth() {
   const headers = { 'Content-Type': 'application/json' }
-  if (supabase) {
-    const {
-      data: { session },
-    } = await supabase.auth.getSession()
-    if (session?.access_token) headers.Authorization = `Bearer ${session.access_token}`
+  if (!supabase) return headers
+
+  let {
+    data: { session },
+  } = await supabase.auth.getSession()
+
+  if (!session?.access_token) {
+    const { data: refreshed } = await supabase.auth.refreshSession()
+    session = refreshed?.session ?? null
+  }
+
+  if (session?.access_token) {
+    headers.Authorization = `Bearer ${session.access_token}`
   }
   return headers
 }
@@ -53,6 +61,13 @@ export default function PhotoUploadModal({ isOpen, onClose, profile, onSaved, la
     const useLatest = Boolean(addToLatestVisit && latestSessionId)
     let batchSessionId = useLatest ? latestSessionId : null
 
+    const authHeaders = await jsonHeadersWithAuth()
+    if (!authHeaders.Authorization) {
+      setError('Sign-in required to save photos. Refresh the page or open Settings and sign in again.')
+      setBusy(false)
+      return
+    }
+
     try {
       for (let i = 0; i < files.length; i++) {
         if (files.length > 1) {
@@ -80,7 +95,7 @@ export default function PhotoUploadModal({ isOpen, onClose, profile, onSaved, la
 
           const pr = await fetch('/api/progress-photo', {
             method: 'POST',
-            headers: await jsonHeadersWithAuth(),
+            headers: authHeaders,
             body: JSON.stringify(body),
           })
           const payload = await pr.json().catch(() => ({}))
