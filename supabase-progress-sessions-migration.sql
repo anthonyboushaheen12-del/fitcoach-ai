@@ -1,6 +1,9 @@
 -- FitCoach AI — Progress sessions (check-in buckets) + progress_photos.session_id
 -- Run in Supabase SQL Editor after profiles + progress_photos exist.
 -- Then re-run supabase-progress-photo-rpc.sql (updated signature with p_session_id).
+--
+-- If the app says "Could not find the table ... in the schema cache": after this script
+-- finishes, run NOTIFY below, or Supabase Dashboard → Project Settings → API → Reload schema.
 
 -- -----------------------------------------------------------------------------
 -- progress_sessions
@@ -125,3 +128,6 @@ CREATE POLICY "progress_photos_insert_own" ON public.progress_photos
       WHERE s.id = session_id AND s.profile_id = progress_photos.profile_id
     )
   );
+
+-- Refresh PostgREST schema cache so REST/API sees new tables immediately
+NOTIFY pgrst, 'reload schema';

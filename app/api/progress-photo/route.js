@@ -13,6 +13,25 @@ function isRlsPolicyError(err) {
   return m.includes('row-level security') || m.includes('rls')
 }
 
+/** User-facing hint when Supabase has no progress_sessions or stale schema cache. */
+function hintProgressSessionsSetup(rawMessage) {
+  const m = (rawMessage || '').toLowerCase()
+  if (!m.includes('progress_sessions')) return null
+  if (
+    m.includes('schema cache') ||
+    m.includes('could not find') ||
+    m.includes('does not exist') ||
+    (m.includes('relation') && m.includes('does not exist'))
+  ) {
+    return (
+      'Progress check-ins need the latest database setup. In Supabase: open SQL Editor and run ' +
+      'supabase-progress-sessions-migration.sql from the repo, then supabase-progress-photo-rpc.sql. ' +
+      'After that, use Dashboard → Project Settings → API → reload schema (or wait a minute).'
+    )
+  }
+  return null
+}
+
 function normalizeRpcProgressPhotoRow(data) {
   if (data == null) return null
   if (Array.isArray(data)) return data[0] ?? null
@@ -80,7 +99,11 @@ async function ensureSessionForUpload(userSb, serviceSb, profileId, body) {
       .select('id, profile_id, session_date, label, notes')
       .eq('id', incoming)
       .maybeSingle()
-    if (q.error || !q.data || q.data.profile_id !== profileId) {
+    if (q.error) {
+      const hint = hintProgressSessionsSetup(q.error.message)
+      return { error: hint || q.error.message || 'Could not load check-in.', session: null }
+    }
+    if (!q.data || q.data.profile_id !== profileId) {
       return { error: 'Invalid check-in. Start a new check-in or pick the latest visit.', session: null }
     }
     return { error: null, session: q.data }
@@ -101,7 +124,8 @@ async function ensureSessionForUpload(userSb, serviceSb, profileId, body) {
     .select()
     .single()
   if (ins.error) {
-    return { error: ins.error.message || 'Could not create check-in', session: null }
+    const hint = hintProgressSessionsSetup(ins.error.message)
+    return { error: hint || ins.error.message || 'Could not create check-in', session: null }
   }
   return { error: null, session: ins.data }
 }
@@ -127,7 +151,8 @@ export async function GET(request) {
     .order('session_date', { ascending: false })
 
   if (sessErr) {
-    return Response.json({ error: sessErr.message }, { status: 500 })
+    const hint = hintProgressSessionsSetup(sessErr.message)
+    return Response.json({ error: hint || sessErr.message }, { status: 500 })
   }
 
   const { data: rows, error } = await supabase
