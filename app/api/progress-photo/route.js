@@ -13,6 +13,18 @@ function isRlsPolicyError(err) {
   return m.includes('row-level security') || m.includes('rls')
 }
 
+/** True when progress_sessions cannot be used (table missing / not in PostgREST cache yet). Legacy DB can still save photos without session_id. */
+function isProgressSessionsInfraError(rawMessage) {
+  const m = (rawMessage || '').toLowerCase()
+  if (!m.includes('progress_sessions') && !m.includes('schema cache')) return false
+  return (
+    m.includes('schema cache') ||
+    m.includes('could not find') ||
+    m.includes('does not exist') ||
+    (m.includes('relation') && m.includes('does not exist'))
+  )
+}
+
 /** User-facing hint when Supabase schema is missing progress_sessions / session_id or cache is stale. */
 function hintProgressSessionsSetup(rawMessage) {
   const m = (rawMessage || '').toLowerCase()
@@ -57,12 +69,14 @@ async function rpcInsertProgressPhoto(userSb, row) {
 }
 
 async function insertProgressPhotoRow(userSb, serviceSb, row) {
+  const canUseSessionRpc = Boolean(row.session_id)
+
   if (serviceSb) {
     const ins = await serviceSb.from('progress_photos').insert(row).select().single()
     if (!ins.error) {
       return { data: ins.data, error: null, path: 'service_insert' }
     }
-    if (isRlsPolicyError(ins.error)) {
+    if (isRlsPolicyError(ins.error) && canUseSessionRpc) {
       console.warn('progress-photo: service-role insert hit RLS, falling back to RPC')
       const rpc = await rpcInsertProgressPhoto(userSb, row)
       return { data: rpc.data, error: rpc.error, path: 'rpc_after_service_rls' }
@@ -78,10 +92,13 @@ async function insertProgressPhotoRow(userSb, serviceSb, row) {
     return { data: direct.data, error: direct.error, path: 'user_direct' }
   }
 
-  console.warn('progress-photo: user JWT insert hit RLS, falling back to RPC')
+  if (canUseSessionRpc) {
+    console.warn('progress-photo: user JWT insert hit RLS, falling back to RPC')
+    const rpc = await rpcInsertProgressPhoto(userSb, row)
+    return { data: rpc.data, error: rpc.error, path: 'rpc_after_user_rls' }
+  }
 
-  const rpc = await rpcInsertProgressPhoto(userSb, row)
-  return { data: rpc.data, error: rpc.error, path: 'rpc_after_user_rls' }
+  return { data: direct.data, error: direct.error, path: 'user_direct' }
 }
 
 function attachSessionsToPhotos(rows, sessions) {
@@ -102,13 +119,21 @@ async function ensureSessionForUpload(userSb, serviceSb, profileId, body) {
       .eq('id', incoming)
       .maybeSingle()
     if (q.error) {
+      if (isProgressSessionsInfraError(q.error.message)) {
+        return {
+          error:
+            'Check-ins are not available on this database yet. Turn off "Add to latest visit" and try again, or run supabase-progress-sessions-migration.sql in Supabase.',
+          session: null,
+          legacy: false,
+        }
+      }
       const hint = hintProgressSessionsSetup(q.error.message)
-      return { error: hint || q.error.message || 'Could not load check-in.', session: null }
+      return { error: hint || q.error.message || 'Could not load check-in.', session: null, legacy: false }
     }
     if (!q.data || q.data.profile_id !== profileId) {
-      return { error: 'Invalid check-in. Start a new check-in or pick the latest visit.', session: null }
+      return { error: 'Invalid check-in. Start a new check-in or pick the latest visit.', session: null, legacy: false }
     }
-    return { error: null, session: q.data }
+    return { error: null, session: q.data, legacy: false }
   }
   const rawDate = body.sessionDate
   const date =
@@ -126,10 +151,14 @@ async function ensureSessionForUpload(userSb, serviceSb, profileId, body) {
     .select()
     .single()
   if (ins.error) {
+    if (isProgressSessionsInfraError(ins.error.message)) {
+      console.warn('progress-photo: progress_sessions unavailable — saving photo without check-in (legacy DB)')
+      return { error: null, session: null, legacy: true }
+    }
     const hint = hintProgressSessionsSetup(ins.error.message)
-    return { error: hint || ins.error.message || 'Could not create check-in', session: null }
+    return { error: hint || ins.error.message || 'Could not create check-in', session: null, legacy: false }
   }
-  return { error: null, session: ins.data }
+  return { error: null, session: ins.data, legacy: false }
 }
 
 export async function GET(request) {
@@ -146,15 +175,23 @@ export async function GET(request) {
     return Response.json({ error: 'profileId required' }, { status: 400 })
   }
 
-  const { data: sessions, error: sessErr } = await supabase
+  let sessions = []
+  const sessResult = await supabase
     .from('progress_sessions')
     .select('id, profile_id, session_date, label, notes, merged_analysis, created_at')
     .eq('profile_id', profileId)
     .order('session_date', { ascending: false })
 
-  if (sessErr) {
-    const hint = hintProgressSessionsSetup(sessErr.message)
-    return Response.json({ error: hint || sessErr.message }, { status: 500 })
+  if (sessResult.error) {
+    if (isProgressSessionsInfraError(sessResult.error.message)) {
+      console.warn('progress-photo GET: no progress_sessions (legacy mode)', sessResult.error.message)
+      sessions = []
+    } else {
+      const hint = hintProgressSessionsSetup(sessResult.error.message)
+      return Response.json({ error: hint || sessResult.error.message }, { status: 500 })
+    }
+  } else {
+    sessions = sessResult.data || []
   }
 
   const { data: rows, error } = await supabase
@@ -353,7 +390,6 @@ export async function POST(request) {
 
     const row = {
       profile_id: effectiveProfileId,
-      session_id: session.id,
       storage_path: storagePath,
       image_url: null,
       analysis,
@@ -362,9 +398,26 @@ export async function POST(request) {
       notes: notes?.trim?.() ? notes.trim() : null,
       photo_type: photoType || 'front',
     }
+    if (session?.id) {
+      row.session_id = session.id
+    }
 
-    const insertOutcome = await insertProgressPhotoRow(userSb, serviceSb, row)
+    let insertOutcome = await insertProgressPhotoRow(userSb, serviceSb, row)
+
+    if (insertOutcome.error && session?.id) {
+      const msg = (insertOutcome.error.message || '').toLowerCase()
+      if (
+        msg.includes("could not find the 'session_id'") ||
+        (msg.includes('column') && msg.includes('session_id') && msg.includes('does not exist'))
+      ) {
+        delete row.session_id
+        console.warn('progress-photo: retrying insert without session_id (legacy progress_photos schema)')
+        insertOutcome = await insertProgressPhotoRow(userSb, serviceSb, row)
+      }
+    }
+
     const { data: inserted, error: insertError } = insertOutcome
+    const finalStoragePath = inserted?.storage_path || storagePath
 
     if (insertError) {
       await storageClient.storage.from(BUCKET).remove([storagePath])
@@ -387,10 +440,10 @@ export async function POST(request) {
 
     const { data: signed } = await storageClient.storage
       .from(BUCKET)
-      .createSignedUrl(storagePath, SIGNED_URL_SEC)
+      .createSignedUrl(finalStoragePath, SIGNED_URL_SEC)
 
     if (!inserted) {
-      await storageClient.storage.from(BUCKET).remove([storagePath])
+      await storageClient.storage.from(BUCKET).remove([finalStoragePath])
       return Response.json(
         { error: 'Save succeeded but no row returned. Re-run supabase-progress-photo-rpc.sql.' },
         { status: 500 }
@@ -399,9 +452,9 @@ export async function POST(request) {
 
     return Response.json({
       success: true,
-      sessionId: session.id,
-      session,
-      photo: { ...inserted, signedUrl: signed?.signedUrl ?? null, session },
+      sessionId: session?.id ?? null,
+      session: session ?? null,
+      photo: { ...inserted, signedUrl: signed?.signedUrl ?? null, session: session ?? null },
     })
   } catch (e) {
     console.error('progress-photo POST:', e)
