@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
 import { compressImageForUpload } from '../../lib/image-compress'
+import { mergeCheckInAnalysisFromPhotos } from '../../lib/merge-checkin-analysis'
 
 async function jsonHeadersWithAuth() {
   const headers = { 'Content-Type': 'application/json' }
@@ -56,6 +57,8 @@ export default function PhotoUploadModal({ isOpen, onClose, profile, onSaved, la
     const notesVal = notes?.trim() || null
     let saved = 0
     let lastAnalysis = null
+    /** @type {{ analysis: object, photo_type: string, created_at: string }[]} */
+    const batchForMerge = []
     const failures = []
 
     const useLatest = Boolean(addToLatestVisit && latestSessionId)
@@ -109,6 +112,11 @@ export default function PhotoUploadModal({ isOpen, onClose, profile, onSaved, la
             batchSessionId = payload.sessionId
           }
           lastAnalysis = analysis
+          batchForMerge.push({
+            analysis,
+            photo_type: photoType,
+            created_at: new Date(Date.now() + saved).toISOString(),
+          })
           saved++
         } catch (oneErr) {
           failures.push(`#${i + 1}: ${oneErr?.message || 'failed'}`)
@@ -117,7 +125,9 @@ export default function PhotoUploadModal({ isOpen, onClose, profile, onSaved, la
 
       if (saved > 0) {
         setNotes('')
-        onSaved?.({ analysis: lastAnalysis })
+        const merged = mergeCheckInAnalysisFromPhotos(batchForMerge)
+        const analysisForDashboard = merged?.analysis ?? lastAnalysis
+        onSaved?.({ analysis: analysisForDashboard })
       }
       if (failures.length) {
         const suffix =
