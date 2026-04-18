@@ -6,8 +6,9 @@ import { motion } from 'framer-motion'
 import { supabase } from '../../lib/supabase'
 import { getTrainer } from '../../lib/trainers'
 import { applyGoalToPlans } from '../../lib/apply-goal-to-plans'
-import { useAuth, readCachedProfileForUser } from '../components/AuthProvider'
+import { useAuth } from '../components/AuthProvider'
 import BrandedAuthLoading from '../components/BrandedAuthLoading'
+import ProfileLoadRecovery from '../components/ProfileLoadRecovery'
 import { useProfileResolutionTimeout } from '../hooks/useProfileResolutionTimeout'
 import GoalResults from '../components/GoalResults'
 import GoalHistory from '../components/GoalHistory'
@@ -44,7 +45,15 @@ const LOADING_FACTS = [
 
 function GoalsContent() {
   const router = useRouter()
-  const { user, profile, profileLoading, loading: authLoading, refreshProfile } = useAuth()
+  const {
+    user,
+    profile,
+    profileLoading,
+    loading: authLoading,
+    refreshProfile,
+    profileMissingConfirmed,
+    profileFetchError,
+  } = useAuth()
   const profileResolutionTimedOut = useProfileResolutionTimeout(user, profile, 3000)
 
   const [goalInput, setGoalInput] = useState('')
@@ -62,14 +71,10 @@ function GoalsContent() {
 
   useEffect(() => {
     if (!user) router.push('/')
-    else if (user && !profile && !profileLoading && !authLoading && profileResolutionTimedOut) {
-      if (readCachedProfileForUser(user.id)?.id) {
-        refreshProfile()
-        return
-      }
+    else if (user && !profile && !profileLoading && !authLoading && profileMissingConfirmed) {
       router.push('/onboarding')
     }
-  }, [user, profile, profileLoading, authLoading, profileResolutionTimedOut, router, refreshProfile])
+  }, [user, profile, profileLoading, authLoading, profileMissingConfirmed, router])
 
   useEffect(() => {
     if (!loading) return
@@ -213,8 +218,22 @@ function GoalsContent() {
     return <BrandedAuthLoading />
   }
 
-  if (user && !profile && !profileLoading && !authLoading && !profileResolutionTimedOut) {
-    return <BrandedAuthLoading />
+  const showProfileRecovery =
+    user &&
+    !profile &&
+    !profileLoading &&
+    !authLoading &&
+    !profileMissingConfirmed &&
+    (!!profileFetchError || profileResolutionTimedOut)
+
+  if (showProfileRecovery) {
+    return (
+      <ProfileLoadRecovery
+        onRetry={() => refreshProfile()}
+        onHome={() => router.push('/')}
+        detail={profileFetchError}
+      />
+    )
   }
 
   if (!profile) return null

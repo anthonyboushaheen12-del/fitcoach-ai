@@ -5,11 +5,25 @@ import { useRouter } from 'next/navigation'
 import { motion } from 'framer-motion'
 import { useAuth, readCachedProfileForUser } from './components/AuthProvider'
 import BrandedAuthLoading from './components/BrandedAuthLoading'
+import ProfileLoadRecovery from './components/ProfileLoadRecovery'
+import { useProfileResolutionTimeout } from './hooks/useProfileResolutionTimeout'
 import { supabase } from '../lib/supabase'
 
 export default function AuthPage() {
   const router = useRouter()
-  const { user, profile, loading: authLoading, profileLoading, signIn, signUp, signOut, refreshProfile } = useAuth()
+  const {
+    user,
+    profile,
+    loading: authLoading,
+    profileLoading,
+    profileMissingConfirmed,
+    profileFetchError,
+    signIn,
+    signUp,
+    signOut,
+    refreshProfile,
+  } = useAuth()
+  const profileResolutionTimedOut = useProfileResolutionTimeout(user, profile, 3000)
   const [tab, setTab] = useState('signin')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -38,11 +52,20 @@ export default function AuthPage() {
   }
 
   if (user && !profile) {
-    if (readCachedProfileForUser(user.id)?.id) {
-      return <BrandedAuthLoading />
+    if (profileMissingConfirmed) {
+      router.replace('/onboarding')
+      return null
     }
-    router.replace('/onboarding')
-    return null
+    if (profileFetchError || profileResolutionTimedOut) {
+      return (
+        <ProfileLoadRecovery
+          onRetry={() => refreshProfile()}
+          onHome={() => router.replace('/')}
+          detail={profileFetchError}
+        />
+      )
+    }
+    return <BrandedAuthLoading />
   }
 
   if (user && profile) {

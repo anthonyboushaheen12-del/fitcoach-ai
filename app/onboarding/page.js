@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { motion, AnimatePresence } from 'framer-motion'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../components/AuthProvider'
+import BrandedAuthLoading from '../components/BrandedAuthLoading'
 
 const steps = ['basics', 'body', 'goals']
 
@@ -36,6 +37,19 @@ export default function OnboardingPage() {
       router.replace('/dashboard')
     }
   }, [user, profile, profileLoading, router])
+
+  /** Reconcile with DB if context briefly lost the profile (avoids duplicate onboarding). */
+  useEffect(() => {
+    if (!user?.id) return
+    let cancelled = false
+    ;(async () => {
+      const p = await refreshProfile()
+      if (!cancelled && p?.id) router.replace('/dashboard')
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [user?.id, refreshProfile, router])
 
   const goNext = () => {
     if (step < steps.length - 1) {
@@ -88,11 +102,16 @@ export default function OnboardingPage() {
         .select()
 
       if (error) {
+        const msg = (error.message || '').toLowerCase()
+        const isDuplicate =
+          error.code === '23505' || msg.includes('duplicate') || msg.includes('unique')
+        if (isDuplicate) {
+          const p = await refreshProfile()
+          setLoading(false)
+          if (p?.id) router.replace('/dashboard')
+          return
+        }
         console.error('Supabase profile insert error:', error)
-        console.error('Error message:', error.message)
-        console.error('Error details:', error.details)
-        console.error('Error hint:', error.hint)
-        console.error('Insert payload:', JSON.stringify(insertPayload, null, 2))
         alert('Error: ' + (error.message || 'Failed to create profile'))
         setLoading(false)
         return
@@ -172,6 +191,8 @@ export default function OnboardingPage() {
   )
 
   if (!user) return null
+  if (profileLoading) return <BrandedAuthLoading minHeight="70vh" />
+  if (profile?.id) return null
 
   return (
     <div className="app-container" style={{ minHeight: '100vh', padding: '40px 0' }}>

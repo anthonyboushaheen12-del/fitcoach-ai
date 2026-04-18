@@ -4,8 +4,9 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '../../lib/supabase'
 import { getTrainer } from '../../lib/trainers'
-import { useAuth, readCachedProfileForUser } from '../components/AuthProvider'
+import { useAuth } from '../components/AuthProvider'
 import BrandedAuthLoading from '../components/BrandedAuthLoading'
+import ProfileLoadRecovery from '../components/ProfileLoadRecovery'
 import { useProfileResolutionTimeout } from '../hooks/useProfileResolutionTimeout'
 import WeightModal from '../components/WeightModal'
 import TrainerModal from '../components/TrainerModal'
@@ -13,7 +14,16 @@ import ProgressChart from '../components/ProgressChart'
 
 export default function Settings() {
   const router = useRouter()
-  const { user, profile: authProfile, refreshProfile, signOut, profileLoading, loading: authLoading } = useAuth()
+  const {
+    user,
+    profile: authProfile,
+    refreshProfile,
+    signOut,
+    profileLoading,
+    loading: authLoading,
+    profileMissingConfirmed,
+    profileFetchError,
+  } = useAuth()
   const profileResolutionTimedOut = useProfileResolutionTimeout(user, authProfile, 3000)
   const [profile, setProfile] = useState(authProfile)
   const [weightLogs, setWeightLogs] = useState([])
@@ -27,14 +37,10 @@ export default function Settings() {
       router.push('/')
       return
     }
-    if (user && !authProfile && !profileLoading && !authLoading) {
-      if (readCachedProfileForUser(user.id)?.id) {
-        refreshProfile()
-        return
-      }
+    if (user && !authProfile && !profileLoading && !authLoading && profileMissingConfirmed) {
       router.push('/onboarding')
     }
-  }, [user, authProfile, profileLoading, authLoading, router, refreshProfile])
+  }, [user, authProfile, profileLoading, authLoading, profileMissingConfirmed, router])
 
   useEffect(() => {
     setProfile(authProfile)
@@ -145,51 +151,23 @@ export default function Settings() {
     router.push('/')
   }
 
-  const showProfileStuckError =
+  const showProfileRecovery =
     user &&
     !authProfile &&
-    profileResolutionTimedOut &&
-    (profileLoading || authLoading)
+    !profileLoading &&
+    !authLoading &&
+    !profileMissingConfirmed &&
+    (!!profileFetchError || profileResolutionTimedOut)
 
-  const showSettingsLoading = !showProfileStuckError && !authProfile
+  const showSettingsLoading = !showProfileRecovery && !authProfile
 
-  if (showProfileStuckError) {
+  if (showProfileRecovery) {
     return (
-      <div className="app-container" style={{ paddingTop: 48, paddingBottom: 32, textAlign: 'center' }}>
-        <p style={{ color: '#FB7185', fontSize: 15, fontWeight: 600, marginBottom: 12 }}>Couldn&apos;t load your profile</p>
-        <p style={{ color: '#2D5B3F', fontSize: 14, maxWidth: 360, margin: '0 auto 20px', lineHeight: 1.5 }}>
-          Check your connection, then try again.
-        </p>
-        <button
-          type="button"
-          onClick={() => refreshProfile()}
-          style={{
-            padding: '12px 24px',
-            borderRadius: 12,
-            border: '1px solid rgba(110,231,183,0.35)',
-            background: 'rgba(16,185,129,0.2)',
-            color: '#6EE7B7',
-            fontWeight: 600,
-            marginRight: 12,
-          }}
-        >
-          Retry
-        </button>
-        <button
-          type="button"
-          onClick={() => router.push('/')}
-          style={{
-            padding: '12px 24px',
-            borderRadius: 12,
-            border: '1px solid rgba(110,231,183,0.15)',
-            background: 'transparent',
-            color: '#A7C4B8',
-            fontWeight: 600,
-          }}
-        >
-          Home
-        </button>
-      </div>
+      <ProfileLoadRecovery
+        onRetry={() => refreshProfile()}
+        onHome={() => router.push('/')}
+        detail={profileFetchError}
+      />
     )
   }
 

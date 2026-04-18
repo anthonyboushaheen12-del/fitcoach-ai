@@ -7,7 +7,8 @@ import { motion, AnimatePresence } from 'framer-motion'
 import useSWR from 'swr'
 import { supabase } from '../../lib/supabase'
 import { getTrainer, trainers as trainersList } from '../../lib/trainers'
-import { useAuth, readCachedProfileForUser } from '../components/AuthProvider'
+import { useAuth } from '../components/AuthProvider'
+import ProfileLoadRecovery from '../components/ProfileLoadRecovery'
 import BrandedAuthLoading from '../components/BrandedAuthLoading'
 import { useProfileResolutionTimeout } from '../hooks/useProfileResolutionTimeout'
 import ExerciseRow from '../components/ExerciseRow'
@@ -286,7 +287,15 @@ const inputStyle = {
 export default function Plans() {
   const router = useRouter()
   const searchParams = useSearchParams()
-  const { user, profile, refreshProfile, profileLoading, loading: authLoading } = useAuth()
+  const {
+    user,
+    profile,
+    refreshProfile,
+    profileLoading,
+    loading: authLoading,
+    profileMissingConfirmed,
+    profileFetchError,
+  } = useAuth()
   const profileResolutionTimedOut = useProfileResolutionTimeout(user, profile, 3000)
   const plansSwrKey = profile?.id ? ['plans-all', profile.id] : null
   const {
@@ -309,7 +318,7 @@ export default function Plans() {
       if (res?.error) throw new Error(res.error.message || 'plans error')
       return res?.data ?? []
     },
-    { keepPreviousData: true, revalidateOnFocus: true }
+    { keepPreviousData: true, revalidateOnFocus: false, dedupingInterval: 8000 }
   )
   const [pantryDescription, setPantryDescription] = useState('')
   const [eatingToday, setEatingToday] = useState('')
@@ -352,14 +361,10 @@ export default function Plans() {
       router.push('/')
       return
     }
-    if (user && !profile && !profileLoading && !authLoading) {
-      if (readCachedProfileForUser(user.id)?.id) {
-        refreshProfile()
-        return
-      }
+    if (user && !profile && !profileLoading && !authLoading && profileMissingConfirmed) {
       router.push('/onboarding')
     }
-  }, [user, profile, profileLoading, authLoading, router, refreshProfile])
+  }, [user, profile, profileLoading, authLoading, profileMissingConfirmed, router])
 
   useEffect(() => {
     const start = searchParams.get('start')
@@ -811,56 +816,28 @@ export default function Plans() {
     }
   }
 
-  const showProfileStuckError =
+  const showProfileRecovery =
     user &&
     !profile &&
-    profileResolutionTimedOut &&
-    (profileLoading || authLoading)
+    !profileLoading &&
+    !authLoading &&
+    !profileMissingConfirmed &&
+    (!!profileFetchError || profileResolutionTimedOut)
 
   const showPlansGateLoading =
     (!profile ||
       authLoading ||
       profileLoading ||
       (Boolean(plansSwrKey) && plansSwrLoading && plans.length === 0 && !plansSwrError)) &&
-    !showProfileStuckError
+    !showProfileRecovery
 
-  if (showProfileStuckError) {
+  if (showProfileRecovery) {
     return (
-      <div className="app-container" style={{ paddingTop: 48, paddingBottom: 32, textAlign: 'center' }}>
-        <p style={{ color: '#FB7185', fontSize: 15, fontWeight: 600, marginBottom: 12 }}>Couldn&apos;t load your profile</p>
-        <p style={{ color: '#2D5B3F', fontSize: 14, maxWidth: 360, margin: '0 auto 20px', lineHeight: 1.5 }}>
-          Check your connection, then try again.
-        </p>
-        <button
-          type="button"
-          onClick={() => refreshProfile()}
-          style={{
-            padding: '12px 24px',
-            borderRadius: 12,
-            border: '1px solid rgba(110,231,183,0.35)',
-            background: 'rgba(16,185,129,0.2)',
-            color: '#6EE7B7',
-            fontWeight: 600,
-            marginRight: 12,
-          }}
-        >
-          Retry
-        </button>
-        <button
-          type="button"
-          onClick={() => router.push('/')}
-          style={{
-            padding: '12px 24px',
-            borderRadius: 12,
-            border: '1px solid rgba(110,231,183,0.15)',
-            background: 'transparent',
-            color: '#A7C4B8',
-            fontWeight: 600,
-          }}
-        >
-          Home
-        </button>
-      </div>
+      <ProfileLoadRecovery
+        onRetry={() => refreshProfile()}
+        onHome={() => router.push('/')}
+        detail={profileFetchError}
+      />
     )
   }
 

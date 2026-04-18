@@ -21,10 +21,28 @@ export default function SplashScreen({ onComplete }) {
     try {
       const nav = performance.getEntriesByType?.('navigation')?.[0]
       const isReload = nav?.type === 'reload'
-      if (!isReload && hasLikelySupabaseSession()) {
+      const hasSession = hasLikelySupabaseSession()
+      if (hasSession && !isReload) {
         setVisible(false)
         onComplete?.()
         return
+      }
+      if (hasSession && isReload) {
+        setVisible(true)
+        const duration = 320
+        const progressMs = 280
+        const interval = 20
+        let elapsed = 0
+        const timer = setInterval(() => {
+          elapsed += interval
+          setProgress(Math.min((elapsed / progressMs) * 100, 100))
+          if (elapsed >= duration) {
+            clearInterval(timer)
+            setVisible(false)
+            onComplete?.()
+          }
+        }, interval)
+        return () => clearInterval(timer)
       }
     } catch {
       /* ignore */

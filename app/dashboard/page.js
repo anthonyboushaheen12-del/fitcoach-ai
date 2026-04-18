@@ -7,8 +7,9 @@ import { useRouter } from 'next/navigation'
 import { motion } from 'framer-motion'
 import { supabase } from '../../lib/supabase'
 import { getTrainer } from '../../lib/trainers'
-import { useAuth, readCachedProfileForUser } from '../components/AuthProvider'
+import { useAuth } from '../components/AuthProvider'
 import BrandedAuthLoading from '../components/BrandedAuthLoading'
+import ProfileLoadRecovery from '../components/ProfileLoadRecovery'
 import { useProfileResolutionTimeout } from '../hooks/useProfileResolutionTimeout'
 import ExerciseRow from '../components/ExerciseRow'
 import BodyImageSlot from '../components/BodyImageSlot'
@@ -226,6 +227,7 @@ function DashboardShortcutStrip({
 }) {
   const items = [
     { icon: '📋', label: 'Plans', onClick: () => router.push('/plans') },
+    { icon: '🎯', label: 'Goals', onClick: () => router.push('/goals') },
     { icon: '💬', label: 'Coach', sub: chatLabel, onClick: () => router.push('/plans?coach=1') },
     { icon: '🥗', label: 'Log meal', onClick: onOpenFood },
     { icon: '🏋️', label: 'Log workout', onClick: onOpenWorkout },
@@ -262,7 +264,15 @@ function DashboardShortcutStrip({
 
 export default function Dashboard() {
   const router = useRouter()
-  const { user, profile: authProfile, loading: authLoading, profileLoading, refreshProfile } = useAuth()
+  const {
+    user,
+    profile: authProfile,
+    loading: authLoading,
+    profileLoading,
+    profileMissingConfirmed,
+    profileFetchError,
+    refreshProfile,
+  } = useAuth()
   const profileResolutionTimedOut = useProfileResolutionTimeout(user, authProfile, 3000)
   const [weightModalOpen, setWeightModalOpen] = useState(false)
   const [trainerModalOpen, setTrainerModalOpen] = useState(false)
@@ -282,6 +292,7 @@ export default function Dashboard() {
   const [adjustScope, setAdjustScope] = useState('both')
   const [adjustLoading, setAdjustLoading] = useState(false)
   const [adjustError, setAdjustError] = useState(null)
+  const [deferHeavyWidgets, setDeferHeavyWidgets] = useState(false)
 
   const profile = authProfile
   const trainer = profile ? getTrainer(profile.trainer) : getTrainer('bro')
@@ -332,14 +343,10 @@ export default function Dashboard() {
       router.push('/')
       return
     }
-    if (user && !authProfile && !profileLoading && !authLoading) {
-      if (readCachedProfileForUser(user.id)?.id) {
-        refreshProfile()
-        return
-      }
+    if (user && !authProfile && !profileLoading && !authLoading && profileMissingConfirmed) {
       router.push('/onboarding')
     }
-  }, [user, authProfile, profileLoading, authLoading, router, refreshProfile])
+  }, [user, authProfile, profileLoading, authLoading, profileMissingConfirmed, router])
 
   const missingProfileId = Boolean(profile) && !profile?.id
 
@@ -422,18 +429,41 @@ export default function Dashboard() {
     const profileId = profile.id
     const today = new Date().toISOString().split('T')[0]
     let cancelled = false
+    let idleId = null
+    let timeoutId = null
+
     ;(async () => {
       try {
-        const headers = await jsonHeadersWithAuth()
-        const [photoJson, mealJson, workoutJson] = await Promise.all([
-          fetch(`/api/progress-photo?profileId=${profileId}`, { headers }).then((r) => r.json()).catch(() => ({})),
-          fetch(`/api/meal-log?profileId=${profileId}&date=${today}`).then((r) => r.json()).catch(() => ({})),
-          fetch(`/api/workout-log?profileId=${profileId}&limit=10`).then((r) => r.json()).catch(() => ({})),
-        ])
+        const mealJson = await fetch(`/api/meal-log?profileId=${profileId}&date=${today}`)
+          .then((r) => r.json())
+          .catch(() => ({}))
         if (cancelled) return
-        setProgressPhotos(photoJson.photos || [])
         setTodayMeals(mealJson.meals || [])
-        setRecentWorkouts(workoutJson.workouts || [])
+
+        const runSecondary = async () => {
+          if (cancelled) return
+          try {
+            const headers = await jsonHeadersWithAuth()
+            const [photoJson, workoutJson] = await Promise.all([
+              fetch(`/api/progress-photo?profileId=${profileId}`, { headers }).then((r) => r.json()).catch(() => ({})),
+              fetch(`/api/workout-log?profileId=${profileId}&limit=10`).then((r) => r.json()).catch(() => ({})),
+            ])
+            if (cancelled) return
+            setProgressPhotos(photoJson.photos || [])
+            setRecentWorkouts(workoutJson.workouts || [])
+          } catch {
+            if (!cancelled) {
+              setProgressPhotos([])
+              setRecentWorkouts([])
+            }
+          }
+        }
+
+        if (typeof requestIdleCallback !== 'undefined') {
+          idleId = requestIdleCallback(runSecondary, { timeout: 2000 })
+        } else {
+          timeoutId = setTimeout(runSecondary, 1)
+        }
       } catch {
         if (!cancelled) {
           setProgressPhotos([])
@@ -442,8 +472,34 @@ export default function Dashboard() {
         }
       }
     })()
+
     return () => {
       cancelled = true
+      if (idleId != null && typeof cancelIdleCallback !== 'undefined') cancelIdleCallback(idleId)
+      if (timeoutId != null) clearTimeout(timeoutId)
+    }
+  }, [profile?.id])
+
+  useEffect(() => {
+    if (!profile?.id) {
+      setDeferHeavyWidgets(false)
+      return
+    }
+    let cancelled = false
+    let idleId = null
+    let timeoutId = null
+    const run = () => {
+      if (!cancelled) setDeferHeavyWidgets(true)
+    }
+    if (typeof requestIdleCallback !== 'undefined') {
+      idleId = requestIdleCallback(run, { timeout: 2500 })
+    } else {
+      timeoutId = setTimeout(run, 300)
+    }
+    return () => {
+      cancelled = true
+      if (idleId != null && typeof cancelIdleCallback !== 'undefined') cancelIdleCallback(idleId)
+      if (timeoutId != null) clearTimeout(timeoutId)
     }
   }, [profile?.id])
 
@@ -588,53 +644,25 @@ export default function Dashboard() {
     }
   }
 
-  const showProfileStuckError =
+  const showProfileRecovery =
     user &&
     !authProfile &&
-    profileResolutionTimedOut &&
-    (profileLoading || authLoading)
+    !profileLoading &&
+    !authLoading &&
+    !profileMissingConfirmed &&
+    (!!profileFetchError || profileResolutionTimedOut)
 
   const showDashboardLoading =
-    !showProfileStuckError &&
+    !showProfileRecovery &&
     (authLoading || (!profile?.id && profileLoading) || !profile)
 
-  if (showProfileStuckError) {
+  if (showProfileRecovery) {
     return (
-      <div className="dashboard-app-container" style={{ paddingTop: 48, paddingBottom: 32, textAlign: 'center' }}>
-        <p style={{ color: '#FB7185', fontSize: 15, fontWeight: 600, marginBottom: 12 }}>Couldn&apos;t load your profile</p>
-        <p style={{ color: '#2D5B3F', fontSize: 14, maxWidth: 360, margin: '0 auto 20px', lineHeight: 1.5 }}>
-          Check your connection or Supabase status, then try again.
-        </p>
-        <button
-          type="button"
-          onClick={() => refreshProfile()}
-          style={{
-            padding: '12px 24px',
-            borderRadius: 12,
-            border: '1px solid rgba(110,231,183,0.35)',
-            background: 'rgba(16,185,129,0.2)',
-            color: '#6EE7B7',
-            fontWeight: 600,
-            marginRight: 12,
-          }}
-        >
-          Retry
-        </button>
-        <button
-          type="button"
-          onClick={() => router.push('/')}
-          style={{
-            padding: '12px 24px',
-            borderRadius: 12,
-            border: '1px solid rgba(110,231,183,0.15)',
-            background: 'transparent',
-            color: '#A7C4B8',
-            fontWeight: 600,
-          }}
-        >
-          Home
-        </button>
-      </div>
+      <ProfileLoadRecovery
+        onRetry={() => refreshProfile()}
+        onHome={() => router.push('/')}
+        detail={profileFetchError}
+      />
     )
   }
 
@@ -1401,68 +1429,166 @@ export default function Dashboard() {
         </div>
       </motion.div>
 
-      <GoalDashboardWidget
-        profileId={profile?.id}
-        profileWeightKg={profile?.weight_kg}
-        cardDelay={(cardDelays[1] + 20) / 1000}
-      />
+      {deferHeavyWidgets ? (
+        <>
+          <GoalDashboardWidget
+            profileId={profile?.id}
+            profileWeightKg={profile?.weight_kg}
+            cardDelay={(cardDelays[1] + 20) / 1000}
+          />
 
-      {profile?.trainer === 'calisthenics' ? (
-        <BodyweightSkillTracker profileId={profile.id} cardDelay={(cardDelays[1] + 30) / 1000} />
-      ) : null}
+          {profile?.trainer === 'calisthenics' ? (
+            <BodyweightSkillTracker profileId={profile.id} cardDelay={(cardDelays[1] + 30) / 1000} />
+          ) : null}
 
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: cardDelays[1] + 40 }}
-        className="glass"
-        style={{ padding: 0, marginBottom: 14, overflow: 'hidden' }}
-      >
-        <div
-          style={{
-            padding: '16px 18px',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'flex-start',
-            gap: 12,
-            borderBottom: '1px solid rgba(110,231,183,0.05)',
-          }}
-        >
-          <div>
-            <div style={{ fontSize: 16, fontWeight: 700, color: '#fff' }}>Progress photos</div>
-            <div style={{ fontSize: 11, color: '#4A6B58', marginTop: 4, lineHeight: 1.4 }}>
-              Add new check-in photos whenever you want — same angles help comparisons.
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: cardDelays[1] + 40 }}
+            className="glass"
+            style={{ padding: 0, marginBottom: 14, overflow: 'hidden' }}
+          >
+            <div
+              style={{
+                padding: '16px 18px',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'flex-start',
+                gap: 12,
+                borderBottom: '1px solid rgba(110,231,183,0.05)',
+              }}
+            >
+              <div>
+                <div style={{ fontSize: 16, fontWeight: 700, color: '#fff' }}>Progress photos</div>
+                <div style={{ fontSize: 11, color: '#4A6B58', marginTop: 4, lineHeight: 1.4 }}>
+                  Add new check-in photos whenever you want — same angles help comparisons.
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPhotoModalOpen(true)}
+                style={{
+                  padding: '6px 14px',
+                  borderRadius: 100,
+                  background: 'rgba(110,231,183,0.1)',
+                  border: '1px solid rgba(110,231,183,0.15)',
+                  color: '#6EE7B7',
+                  fontSize: 11,
+                  fontWeight: 700,
+                  flexShrink: 0,
+                }}
+              >
+                + Add photo
+              </button>
             </div>
-          </div>
-          <button
-            type="button"
-            onClick={() => setPhotoModalOpen(true)}
+            <ProgressTimeline
+              photos={progressPhotos}
+              onAdd={() => setPhotoModalOpen(true)}
+              onSelectPhoto={(p) => setPhotoDetail(p)}
+            />
+            {progressPhotos.length >= 2 && (
+              <div style={{ padding: '0 18px 16px' }}>
+                <div style={{ fontSize: 12, color: '#2D5B3F', fontWeight: 600, marginBottom: 8 }}>Body fat trend (estimated)</div>
+                <BodyFatLineChart photos={progressPhotos} height={140} />
+              </div>
+            )}
+          </motion.div>
+
+          {/* Adjust program (free-form) */}
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: cardDelays[1] + 50 }}
+            className="glass"
             style={{
-              padding: '6px 14px',
-              borderRadius: 100,
-              background: 'rgba(110,231,183,0.1)',
-              border: '1px solid rgba(110,231,183,0.15)',
-              color: '#6EE7B7',
-              fontSize: 11,
-              fontWeight: 700,
-              flexShrink: 0,
+              padding: 18,
+              marginBottom: 14,
+              border: '1px solid rgba(110,231,183,0.14)',
+              background: 'rgba(14, 20, 14, 0.92)',
+              WebkitBackfaceVisibility: 'visible',
             }}
           >
-            + Add photo
-          </button>
-        </div>
-        <ProgressTimeline
-          photos={progressPhotos}
-          onAdd={() => setPhotoModalOpen(true)}
-          onSelectPhoto={(p) => setPhotoDetail(p)}
-        />
-        {progressPhotos.length >= 2 && (
-          <div style={{ padding: '0 18px 16px' }}>
-            <div style={{ fontSize: 12, color: '#2D5B3F', fontWeight: 600, marginBottom: 8 }}>Body fat trend (estimated)</div>
-            <BodyFatLineChart photos={progressPhotos} height={140} />
-          </div>
-        )}
-      </motion.div>
+            <div style={{ fontSize: 15, fontWeight: 800, color: '#fff', marginBottom: 6 }}>Change your program</div>
+            <p style={{ fontSize: 12, color: '#8BAFA0', lineHeight: 1.5, marginBottom: 12 }}>
+              Tell the coach anything you want different—schedule, exercises, equipment, injuries, diet tweaks, macro targets, foods to avoid, etc. We&apos;ll regenerate your active plan using your saved quiz answers plus these notes.
+            </p>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
+              {[
+                { id: 'both', label: 'Workout + meals' },
+                { id: 'workout', label: 'Workout only' },
+                { id: 'meal', label: 'Meals only' },
+              ].map(({ id, label }) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => setAdjustScope(id)}
+                  style={{
+                    padding: '8px 14px',
+                    borderRadius: 100,
+                    border: adjustScope === id ? '1px solid rgba(110,231,183,0.45)' : '1px solid rgba(110,231,183,0.12)',
+                    background: adjustScope === id ? 'rgba(16,185,129,0.2)' : 'rgba(14,20,14,0.5)',
+                    color: adjustScope === id ? '#6EE7B7' : '#A7C4B8',
+                    fontSize: 12,
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                  }}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <textarea
+              value={programAdjustText}
+              onChange={(e) => {
+                setProgramAdjustText(e.target.value.slice(0, 2000))
+                if (adjustError) setAdjustError(null)
+              }}
+              placeholder="e.g. Swap barbell bench for dumbbells, only have 3 days/week now, no dairy, more protein at breakfast…"
+              rows={4}
+              style={{
+                width: '100%',
+                boxSizing: 'border-box',
+                padding: '12px 14px',
+                borderRadius: 12,
+                border: '1px solid rgba(110,231,183,0.15)',
+                background: 'rgba(8,12,8,0.65)',
+                color: '#E2FBE8',
+                fontSize: 14,
+                fontFamily: "'Outfit', sans-serif",
+                resize: 'vertical',
+                minHeight: 96,
+                marginBottom: 10,
+              }}
+            />
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
+              <span style={{ fontSize: 11, color: '#4A6B58' }}>{programAdjustText.length}/2000</span>
+              <button
+                type="button"
+                disabled={adjustLoading || !programAdjustText.trim()}
+                onClick={handleRegenerateWithAdjustments}
+                style={{
+                  padding: '12px 20px',
+                  borderRadius: 12,
+                  border: 'none',
+                  background:
+                    adjustLoading || !programAdjustText.trim()
+                      ? 'rgba(74,107,88,0.4)'
+                      : 'linear-gradient(135deg, #10B981, #6EE7B7)',
+                  color: adjustLoading || !programAdjustText.trim() ? '#6B8F7A' : '#070B07',
+                  fontSize: 14,
+                  fontWeight: 700,
+                  cursor: adjustLoading || !programAdjustText.trim() ? 'not-allowed' : 'pointer',
+                }}
+              >
+                {adjustLoading ? 'Updating…' : 'Update program'}
+              </button>
+            </div>
+            {adjustError && (
+              <p style={{ fontSize: 12, color: '#FB7185', marginTop: 10, marginBottom: 0 }}>{adjustError}</p>
+            )}
+          </motion.div>
+        </>
+      ) : null}
 
       <PhotoUploadModal
         isOpen={photoModalOpen}
@@ -1484,100 +1610,6 @@ export default function Dashboard() {
         onCompare={progressPhotos.length >= 2 ? () => setCompareOpen(true) : undefined}
         onDelete={handleDeleteProgressPhoto}
       />
-
-      {/* Adjust program (free-form) */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: cardDelays[1] + 50 }}
-        className="glass"
-        style={{
-          padding: 18,
-          marginBottom: 14,
-          border: '1px solid rgba(110,231,183,0.14)',
-          background: 'rgba(14, 20, 14, 0.92)',
-          WebkitBackfaceVisibility: 'visible',
-        }}
-      >
-        <div style={{ fontSize: 15, fontWeight: 800, color: '#fff', marginBottom: 6 }}>Change your program</div>
-        <p style={{ fontSize: 12, color: '#8BAFA0', lineHeight: 1.5, marginBottom: 12 }}>
-          Tell the coach anything you want different—schedule, exercises, equipment, injuries, diet tweaks, macro targets, foods to avoid, etc. We&apos;ll regenerate your active plan using your saved quiz answers plus these notes.
-        </p>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
-          {[
-            { id: 'both', label: 'Workout + meals' },
-            { id: 'workout', label: 'Workout only' },
-            { id: 'meal', label: 'Meals only' },
-          ].map(({ id, label }) => (
-            <button
-              key={id}
-              type="button"
-              onClick={() => setAdjustScope(id)}
-              style={{
-                padding: '8px 14px',
-                borderRadius: 100,
-                border: adjustScope === id ? '1px solid rgba(110,231,183,0.45)' : '1px solid rgba(110,231,183,0.12)',
-                background: adjustScope === id ? 'rgba(16,185,129,0.2)' : 'rgba(14,20,14,0.5)',
-                color: adjustScope === id ? '#6EE7B7' : '#A7C4B8',
-                fontSize: 12,
-                fontWeight: 600,
-                cursor: 'pointer',
-              }}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-        <textarea
-          value={programAdjustText}
-          onChange={(e) => {
-            setProgramAdjustText(e.target.value.slice(0, 2000))
-            if (adjustError) setAdjustError(null)
-          }}
-          placeholder="e.g. Swap barbell bench for dumbbells, only have 3 days/week now, no dairy, more protein at breakfast…"
-          rows={4}
-          style={{
-            width: '100%',
-            boxSizing: 'border-box',
-            padding: '12px 14px',
-            borderRadius: 12,
-            border: '1px solid rgba(110,231,183,0.15)',
-            background: 'rgba(8,12,8,0.65)',
-            color: '#E2FBE8',
-            fontSize: 14,
-            fontFamily: "'Outfit', sans-serif",
-            resize: 'vertical',
-            minHeight: 96,
-            marginBottom: 10,
-          }}
-        />
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
-          <span style={{ fontSize: 11, color: '#4A6B58' }}>{programAdjustText.length}/2000</span>
-          <button
-            type="button"
-            disabled={adjustLoading || !programAdjustText.trim()}
-            onClick={handleRegenerateWithAdjustments}
-            style={{
-              padding: '12px 20px',
-              borderRadius: 12,
-              border: 'none',
-              background:
-                adjustLoading || !programAdjustText.trim()
-                  ? 'rgba(74,107,88,0.4)'
-                  : 'linear-gradient(135deg, #10B981, #6EE7B7)',
-              color: adjustLoading || !programAdjustText.trim() ? '#6B8F7A' : '#070B07',
-              fontSize: 14,
-              fontWeight: 700,
-              cursor: adjustLoading || !programAdjustText.trim() ? 'not-allowed' : 'pointer',
-            }}
-          >
-            {adjustLoading ? 'Updating…' : 'Update program'}
-          </button>
-        </div>
-        {adjustError && (
-          <p style={{ fontSize: 12, color: '#FB7185', marginTop: 10, marginBottom: 0 }}>{adjustError}</p>
-        )}
-      </motion.div>
 
       {/* C. Muscle Coverage (weekly) */}
       {workoutContent?.days?.length > 0 && (

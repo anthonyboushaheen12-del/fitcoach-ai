@@ -18,6 +18,8 @@ export function readCachedProfileForUser(userId) {
   return null
 }
 
+/** @typedef {{ status: 'ok', profile: object } | { status: 'empty' } | { status: 'error', reason: string }} ProfileFetchResult */
+
 export function AuthProvider({ children }) {
   const router = useRouter()
   const [user, setUser] = useState(null)
@@ -25,21 +27,71 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true)
   const [profileLoading, setProfileLoading] = useState(false)
   const [showFallback, setShowFallback] = useState(false)
+  /** True only after server confirmed no profile row for this user (not timeout/network). */
+  const [profileMissingConfirmed, setProfileMissingConfirmed] = useState(false)
+  /** Last profile fetch failed (timeout/network/Supabase error); user may still have cached profile. */
+  const [profileFetchError, setProfileFetchError] = useState(null)
 
-  const fetchProfile = useCallback(async (userId) => {
-    if (!supabase || !userId) return null
+  const fetchProfileWithMeta = useCallback(async (userId) => {
+    if (!supabase || !userId) return { status: 'error', reason: 'no_client' }
+    const timeoutMs = 10000
     const timeout = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error('Profile fetch timeout')), 10000)
+      setTimeout(() => reject(new Error('Profile fetch timeout')), timeoutMs)
     )
     try {
-      const { data } = await Promise.race([
+      const { data, error } = await Promise.race([
         supabase.from('profiles').select('*').eq('user_id', userId).maybeSingle(),
         timeout,
       ])
-      return data ?? null
-    } catch {
-      return null
+      if (error) {
+        console.warn('Profile fetch:', error.message)
+        return { status: 'error', reason: error.message || 'query_error' }
+      }
+      if (data) return { status: 'ok', profile: data }
+      return { status: 'empty' }
+    } catch (e) {
+      const msg = e?.message || 'unknown'
+      return { status: 'error', reason: msg }
     }
+  }, [])
+
+  /** @deprecated Prefer fetchProfileWithMeta; returns profile or null (lossy). */
+  const fetchProfile = useCallback(
+    async (userId) => {
+      const r = await fetchProfileWithMeta(userId)
+      return r.status === 'ok' ? r.profile : null
+    },
+    [fetchProfileWithMeta]
+  )
+
+  const applyProfileFetchResult = useCallback((userId, result) => {
+    if (result.status === 'ok') {
+      setProfile(result.profile)
+      localStorage.setItem('profileId', result.profile.id)
+      localStorage.setItem('profile', JSON.stringify(result.profile))
+      setProfileMissingConfirmed(false)
+      setProfileFetchError(null)
+      return
+    }
+    if (result.status === 'empty') {
+      setProfile(null)
+      localStorage.removeItem('profileId')
+      localStorage.removeItem('profile')
+      setProfileMissingConfirmed(true)
+      setProfileFetchError(null)
+      return
+    }
+    setProfile((prev) => {
+      const cached = readCachedProfileForUser(userId)
+      const merged = cached ?? (prev?.user_id === userId ? prev : null)
+      if (merged) {
+        localStorage.setItem('profileId', merged.id)
+        localStorage.setItem('profile', JSON.stringify(merged))
+      }
+      return merged ?? null
+    })
+    setProfileMissingConfirmed(false)
+    setProfileFetchError(result.reason || 'Could not load profile')
   }, [])
 
   const forceReleaseLoading = useCallback(() => {
@@ -89,6 +141,8 @@ export function AuthProvider({ children }) {
             localStorage.removeItem('profile')
             localStorage.removeItem('onboardingContext')
             localStorage.removeItem('aspirationGoal')
+            setProfileMissingConfirmed(false)
+            setProfileFetchError(null)
             const url = new URL(window.location.href)
             url.searchParams.delete('signout')
             const next = `${url.pathname}${url.search}${url.hash}`
@@ -97,7 +151,6 @@ export function AuthProvider({ children }) {
         }
 
         let u = null
-        // Reload path: session is usually in localStorage — getSession is much faster than getUser (network).
         try {
           const { data: sessFast } = await race(
             supabase.auth.getSession(),
@@ -134,17 +187,9 @@ export function AuthProvider({ children }) {
           setProfileLoading(true)
           setLoading(false)
           try {
-            const p = await fetchProfile(u.id)
+            const result = await fetchProfileWithMeta(u.id)
             if (cancelled) return
-            const merged = p ?? readCachedProfileForUser(u.id)
-            setProfile(merged || null)
-            if (merged) {
-              localStorage.setItem('profileId', merged.id)
-              localStorage.setItem('profile', JSON.stringify(merged))
-            } else {
-              localStorage.removeItem('profileId')
-              localStorage.removeItem('profile')
-            }
+            applyProfileFetchResult(u.id, result)
           } finally {
             if (!cancelled) setProfileLoading(false)
           }
@@ -152,6 +197,8 @@ export function AuthProvider({ children }) {
           setProfile(null)
           localStorage.removeItem('profileId')
           localStorage.removeItem('profile')
+          setProfileMissingConfirmed(false)
+          setProfileFetchError(null)
         }
       } catch (err) {
         console.error('Auth init error:', err)
@@ -168,7 +215,6 @@ export function AuthProvider({ children }) {
     initAuth()
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      // INITIAL_SESSION often races with initAuth; a null first event clears the user and feels like "signed out".
       if (event === 'INITIAL_SESSION') return
 
       const u = session?.user || null
@@ -181,17 +227,8 @@ export function AuthProvider({ children }) {
           setProfileLoading(true)
         }
         try {
-          const p = await fetchProfile(u.id)
-          const merged = p ?? readCachedProfileForUser(u.id)
-          setProfile((prev) => {
-            if (merged != null) return merged
-            if (prev?.user_id === u.id) return prev
-            return null
-          })
-          if (merged) {
-            localStorage.setItem('profileId', merged.id)
-            localStorage.setItem('profile', JSON.stringify(merged))
-          }
+          const result = await fetchProfileWithMeta(u.id)
+          applyProfileFetchResult(u.id, result)
         } finally {
           if (!isTokenRefresh) setProfileLoading(false)
         }
@@ -202,6 +239,8 @@ export function AuthProvider({ children }) {
         localStorage.removeItem('profile')
         localStorage.removeItem('onboardingContext')
         localStorage.removeItem('aspirationGoal')
+        setProfileMissingConfirmed(false)
+        setProfileFetchError(null)
       }
       setLoading(false)
     })
@@ -212,7 +251,7 @@ export function AuthProvider({ children }) {
       clearTimeout(stuckWatchdog)
       subscription?.unsubscribe()
     }
-  }, [fetchProfile])
+  }, [fetchProfileWithMeta, applyProfileFetchResult])
 
   const signIn = async (email, password) => {
     if (!supabase) throw new Error('Supabase not configured')
@@ -231,46 +270,62 @@ export function AuthProvider({ children }) {
     if (supabase) await supabase.auth.signOut()
     setUser(null)
     setProfile(null)
+    setProfileMissingConfirmed(false)
+    setProfileFetchError(null)
     localStorage.clear()
     router.push('/')
   }
 
   const refreshProfile = useCallback(async () => {
-    if (user) {
-      const p = await fetchProfile(user.id)
-      // Never wipe profile on timeout/network failure — keeps dashboard from sending users to onboarding
-      if (p) {
-        setProfile(p)
-        localStorage.setItem('profileId', p.id)
-        localStorage.setItem('profile', JSON.stringify(p))
-        return p
-      }
-      const cached = readCachedProfileForUser(user.id)
-      if (cached) {
-        setProfile(cached)
-        return cached
-      }
+    if (!user) return null
+    const result = await fetchProfileWithMeta(user.id)
+    if (result.status === 'ok') {
+      setProfile(result.profile)
+      localStorage.setItem('profileId', result.profile.id)
+      localStorage.setItem('profile', JSON.stringify(result.profile))
+      setProfileMissingConfirmed(false)
+      setProfileFetchError(null)
+      return result.profile
+    }
+    if (result.status === 'empty') {
+      setProfile(null)
+      localStorage.removeItem('profileId')
+      localStorage.removeItem('profile')
+      setProfileMissingConfirmed(true)
+      setProfileFetchError(null)
       return null
     }
+    const cached = readCachedProfileForUser(user.id)
+    if (cached) {
+      setProfile(cached)
+      setProfileMissingConfirmed(false)
+      setProfileFetchError(result.reason || 'Could not load profile')
+      return cached
+    }
+    setProfileFetchError(result.reason || 'Could not load profile')
+    setProfileMissingConfirmed(false)
     return null
-  }, [user, fetchProfile])
+  }, [user, fetchProfileWithMeta])
+
+  const ctxValue = {
+    user,
+    profile,
+    loading,
+    profileLoading,
+    profileMissingConfirmed,
+    profileFetchError,
+    signIn,
+    signUp,
+    signOut,
+    refreshProfile,
+    fetchProfile,
+    fetchProfileWithMeta,
+    forceReleaseLoading,
+  }
 
   if (loading) {
     return (
-      <AuthContext.Provider
-        value={{
-          user,
-          profile,
-          loading,
-          profileLoading,
-          signIn,
-          signUp,
-          signOut,
-          refreshProfile,
-          fetchProfile,
-          forceReleaseLoading,
-        }}
-      >
+      <AuthContext.Provider value={ctxValue}>
         <div style={{ position: 'relative', minHeight: '100vh' }}>
           <BrandedAuthLoading />
           {showFallback && (
@@ -310,20 +365,7 @@ export function AuthProvider({ children }) {
   }
 
   return (
-    <AuthContext.Provider
-      value={{
-        user,
-        profile,
-        loading,
-        profileLoading,
-        signIn,
-        signUp,
-        signOut,
-        refreshProfile,
-        fetchProfile,
-        forceReleaseLoading,
-      }}
-    >
+    <AuthContext.Provider value={ctxValue}>
       {children}
     </AuthContext.Provider>
   )
