@@ -11,14 +11,17 @@ import { useAuth } from '../components/AuthProvider'
 import BrandedAuthLoading from '../components/BrandedAuthLoading'
 import ProfileLoadRecovery from '../components/ProfileLoadRecovery'
 import { useProfileResolutionTimeout } from '../hooks/useProfileResolutionTimeout'
-import ExerciseRow from '../components/ExerciseRow'
 import BodyImageSlot from '../components/BodyImageSlot'
+import DailyMacrosCard from '../components/DailyMacrosCard'
+import TodaysMealsCard from '../components/TodaysMealsCard'
+import QuickCoachPanel from '../components/QuickCoachPanel'
 
 const ProgressChart = dynamic(() => import('../components/ProgressChart'), { ssr: false, loading: () => null })
 const WeightModal = dynamic(() => import('../components/WeightModal'), { ssr: false, loading: () => null })
 const TrainerModal = dynamic(() => import('../components/TrainerModal'), { ssr: false, loading: () => null })
 const WorkoutMuscleMap = dynamic(() => import('../components/WorkoutMuscleMap'), { ssr: false, loading: () => null })
 const FoodLogModal = dynamic(() => import('../components/FoodLogModal'), { ssr: false, loading: () => null })
+const WorkoutHubCard = dynamic(() => import('../components/WorkoutHubCard'), { ssr: false, loading: () => null })
 const LogWorkoutModal = dynamic(() => import('../components/LogWorkoutModal'), { ssr: false, loading: () => null })
 const ProgressTimeline = dynamic(() => import('../components/ProgressTimeline'), { ssr: false, loading: () => null })
 const PhotoUploadModal = dynamic(() => import('../components/PhotoUploadModal'), { ssr: false, loading: () => null })
@@ -89,6 +92,16 @@ function hasUsableWorkoutPlan(workoutPlanRow) {
   if (Array.isArray(c.days) && c.days.length > 0) return true
   if (Array.isArray(c.todayExercises) && c.todayExercises.length > 0) return true
   if (typeof c.name === 'string' && c.name.trim().length > 0) return true
+  return false
+}
+
+function hasUsableMealPlan(mealPlanRow) {
+  const c = mealPlanRow?.content
+  if (!c || typeof c !== 'object') return false
+  const cal = c.dailyCalories
+  if (typeof cal === 'number' && Number.isFinite(cal) && cal > 0) return true
+  if (typeof cal === 'string' && String(cal).replace(/\D/g, '').length > 0) return true
+  if (Array.isArray(c.meals) && c.meals.length > 0) return true
   return false
 }
 
@@ -292,7 +305,7 @@ export default function Dashboard() {
   const [adjustScope, setAdjustScope] = useState('both')
   const [adjustLoading, setAdjustLoading] = useState(false)
   const [adjustError, setAdjustError] = useState(null)
-  const [deferHeavyWidgets, setDeferHeavyWidgets] = useState(false)
+  const [showMoreTools, setShowMoreTools] = useState(false)
 
   const profile = authProfile
   const trainer = profile ? getTrainer(profile.trainer) : getTrainer('bro')
@@ -473,29 +486,6 @@ export default function Dashboard() {
       }
     })()
 
-    return () => {
-      cancelled = true
-      if (idleId != null && typeof cancelIdleCallback !== 'undefined') cancelIdleCallback(idleId)
-      if (timeoutId != null) clearTimeout(timeoutId)
-    }
-  }, [profile?.id])
-
-  useEffect(() => {
-    if (!profile?.id) {
-      setDeferHeavyWidgets(false)
-      return
-    }
-    let cancelled = false
-    let idleId = null
-    let timeoutId = null
-    const run = () => {
-      if (!cancelled) setDeferHeavyWidgets(true)
-    }
-    if (typeof requestIdleCallback !== 'undefined') {
-      idleId = requestIdleCallback(run, { timeout: 2500 })
-    } else {
-      timeoutId = setTimeout(run, 300)
-    }
     return () => {
       cancelled = true
       if (idleId != null && typeof cancelIdleCallback !== 'undefined') cancelIdleCallback(idleId)
@@ -1112,7 +1102,7 @@ export default function Dashboard() {
             </p>
             <button
               type="button"
-              onClick={() => router.push('/plans?start=workout')}
+              onClick={() => router.push('/plans')}
               style={{
                 width: '100%',
                 maxWidth: 320,
@@ -1192,6 +1182,7 @@ export default function Dashboard() {
   const workoutContent = plans.workout?.content || null
   const mealContent = plans.meal?.content || null
   const hasWorkoutPlan = hasUsableWorkoutPlan(plans.workout)
+  const hasMealPlan = hasUsableMealPlan(plans.meal)
   const startWeight = weightLogs[0]?.weight_kg ?? profile.weight_kg
   const currentWeight = profile.weight_kg
   const swN = typeof startWeight === 'number' && !Number.isNaN(startWeight) ? startWeight : null
@@ -1309,128 +1300,176 @@ export default function Dashboard() {
         </div>
       </motion.div>
 
-      <DashboardAtAGlance
-        profileRow={profile}
-        coachFirstName={(trainer.name || '').split(/\s+/)[0] || ''}
+      <DailyMacrosCard
+        profile={profile}
+        mealContent={mealContent}
+        workoutContent={workoutContent}
+        todayMeals={todayMeals}
+        cardDelay={cardDelays[1]}
       />
-      <DashboardShortcutStrip
+      <TodaysMealsCard
+        todayMeals={todayMeals}
+        onLogMeal={() => setFoodLogModalOpen(true)}
+        onCreateMealPlan={() => router.push('/plans')}
+        hasMealPlan={hasMealPlan}
+        cardDelay={cardDelays[2]}
+      />
+      <WorkoutHubCard
         router={router}
-        chatLabel={(trainer.name || 'Coach').split(/\s+/).pop()}
-        onOpenFood={() => setFoodLogModalOpen(true)}
-        onOpenWorkout={() => setWorkoutLogModalOpen(true)}
-        onOpenPhoto={() => setPhotoModalOpen(true)}
+        workoutContent={workoutContent}
+        hasWorkoutPlan={hasWorkoutPlan}
+        recentWorkouts={recentWorkouts}
+        onOpenLogWorkout={() => setWorkoutLogModalOpen(true)}
+        cardDelay={cardDelays[3]}
+      />
+      <QuickCoachPanel
+        profile={profile}
+        activeWorkoutContent={workoutContent}
+        activeMealContent={mealContent}
+        cardDelay={cardDelays[4]}
       />
 
-      <div
+      <button
+        type="button"
+        onClick={() => setShowMoreTools((v) => !v)}
         className="glass"
         style={{
-          padding: '14px 16px',
+          width: '100%',
+          padding: 14,
           marginBottom: 14,
-          display: 'flex',
-          justifyContent: 'space-between',
-          flexWrap: 'wrap',
-          gap: 12,
-          border: '1px solid rgba(110,231,183,0.08)',
+          border: '1px solid rgba(110,231,183,0.15)',
+          background: 'rgba(14,20,14,0.65)',
+          color: '#6EE7B7',
+          fontSize: 13,
+          fontWeight: 700,
+          borderRadius: 14,
         }}
       >
-        <div>
-          <div style={{ fontSize: 9, color: '#2D5B3F', fontWeight: 700, letterSpacing: 0.5 }}>TODAY · MEALS</div>
-          <div style={{ fontSize: 15, fontWeight: 800, color: '#fff', marginTop: 2 }}>
-            {todayMeals.length} logged
-          </div>
-        </div>
-        <div>
-          <div style={{ fontSize: 9, color: '#2D5B3F', fontWeight: 700, letterSpacing: 0.5 }}>PROGRESS PHOTOS</div>
-          <div style={{ fontSize: 15, fontWeight: 800, color: '#fff', marginTop: 2 }}>{progressPhotos.length}</div>
-        </div>
-        <div>
-          <div style={{ fontSize: 9, color: '#2D5B3F', fontWeight: 700, letterSpacing: 0.5 }}>WEIGHT</div>
-          <div style={{ fontSize: 15, fontWeight: 800, color: '#fff', marginTop: 2 }}>
-            {profile?.weight_kg != null ? `${profile.weight_kg} kg` : '—'}
-          </div>
-        </div>
-      </div>
+        {showMoreTools ? 'Hide extra tools' : 'More tools — goals, progress, shortcuts'}
+      </button>
 
-      {!hasWorkoutPlan && (
-        <div
-          className="glass"
-          style={{
-            padding: 0,
-            marginBottom: 16,
-            overflow: 'hidden',
-            border: '1px solid rgba(110,231,183,0.12)',
-            background: 'rgba(14, 20, 14, 0.92)',
-            WebkitBackfaceVisibility: 'visible',
-          }}
-        >
-          <div style={{ height: 3, background: 'linear-gradient(90deg, #10B981, #6EE7B7)' }} />
-          <div style={{ padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+      {showMoreTools ? (
+        <>
+          <DashboardAtAGlance
+            profileRow={profile}
+            coachFirstName={(trainer.name || '').split(/\s+/)[0] || ''}
+          />
+          <DashboardShortcutStrip
+            router={router}
+            chatLabel={(trainer.name || 'Coach').split(/\s+/).pop()}
+            onOpenFood={() => setFoodLogModalOpen(true)}
+            onOpenWorkout={() => setWorkoutLogModalOpen(true)}
+            onOpenPhoto={() => setPhotoModalOpen(true)}
+          />
+
+          <div
+            className="glass"
+            style={{
+              padding: '14px 16px',
+              marginBottom: 14,
+              display: 'flex',
+              justifyContent: 'space-between',
+              flexWrap: 'wrap',
+              gap: 12,
+              border: '1px solid rgba(110,231,183,0.08)',
+            }}
+          >
             <div>
-              <div style={{ fontSize: 15, fontWeight: 800, color: '#fff' }}>Build your workout program</div>
-              <p style={{ fontSize: 12, color: '#B8D4C4', lineHeight: 1.45, marginTop: 4 }}>
-                Everything below works now with defaults. Add a plan for personalized training & coach match.
-              </p>
+              <div style={{ fontSize: 9, color: '#2D5B3F', fontWeight: 700, letterSpacing: 0.5 }}>TODAY · MEALS</div>
+              <div style={{ fontSize: 15, fontWeight: 800, color: '#fff', marginTop: 2 }}>
+                {todayMeals.length} logged
+              </div>
             </div>
-            <button
-              type="button"
-              onClick={() => router.push('/plans?start=workout')}
+            <div>
+              <div style={{ fontSize: 9, color: '#2D5B3F', fontWeight: 700, letterSpacing: 0.5 }}>PROGRESS PHOTOS</div>
+              <div style={{ fontSize: 15, fontWeight: 800, color: '#fff', marginTop: 2 }}>{progressPhotos.length}</div>
+            </div>
+            <div>
+              <div style={{ fontSize: 9, color: '#2D5B3F', fontWeight: 700, letterSpacing: 0.5 }}>WEIGHT</div>
+              <div style={{ fontSize: 15, fontWeight: 800, color: '#fff', marginTop: 2 }}>
+                {profile?.weight_kg != null ? `${profile.weight_kg} kg` : '—'}
+              </div>
+            </div>
+          </div>
+
+          {!hasWorkoutPlan && (
+            <div
+              className="glass"
               style={{
-                width: '100%',
-                padding: 14,
-                borderRadius: 12,
-                border: 'none',
-                background: 'linear-gradient(135deg, #10B981, #6EE7B7)',
-                color: '#070B07',
-                fontSize: 14,
-                fontWeight: 700,
+                padding: 0,
+                marginBottom: 16,
+                overflow: 'hidden',
+                border: '1px solid rgba(110,231,183,0.12)',
+                background: 'rgba(14, 20, 14, 0.92)',
+                WebkitBackfaceVisibility: 'visible',
               }}
             >
-              Create My Program →
-            </button>
-          </div>
-        </div>
-      )}
+              <div style={{ height: 3, background: 'linear-gradient(90deg, #10B981, #6EE7B7)' }} />
+              <div style={{ padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <div>
+                  <div style={{ fontSize: 15, fontWeight: 800, color: '#fff' }}>Build your workout program</div>
+                  <p style={{ fontSize: 12, color: '#B8D4C4', lineHeight: 1.45, marginTop: 4 }}>
+                    Everything below works now with defaults. Add a plan for personalized training & coach match.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => router.push('/plans')}
+                  style={{
+                    width: '100%',
+                    padding: 14,
+                    borderRadius: 12,
+                    border: 'none',
+                    background: 'linear-gradient(135deg, #10B981, #6EE7B7)',
+                    color: '#070B07',
+                    fontSize: 14,
+                    fontWeight: 700,
+                  }}
+                >
+                  Create My Program →
+                </button>
+              </div>
+            </div>
+          )}
 
-      {/* B. Streak & Quick Stats */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: cardDelays[1] }}
-        className="card-grid"
-        style={{ marginBottom: 14 }}
-      >
-        <div className="glass" style={{ padding: 18, borderTop: '3px solid #F97316' }}>
-          <div style={{ fontSize: 10, color: '#2D5B3F', fontWeight: 600 }}>🔥 STREAK</div>
-          <div style={{ fontSize: 20, fontWeight: 800, color: '#fff' }}>
-            {workoutStreak > 0 ? `${workoutStreak} day${workoutStreak === 1 ? '' : 's'}` : '—'}
-          </div>
-          <div style={{ fontSize: 10, color: '#4A6B58', marginTop: 6, lineHeight: 1.35 }}>
-            {workoutStreak > 0 ? 'Consecutive days with a logged workout.' : 'Log a workout to start a streak.'}
-          </div>
-        </div>
-        <div className="glass" style={{ padding: 18, borderTop: '3px solid #6EE7B7' }}>
-          <div style={{ fontSize: 10, color: '#2D5B3F', fontWeight: 600 }}>⚡ THIS WEEK</div>
-          <div style={{ fontSize: 20, fontWeight: 800, color: '#fff' }}>
-            {workoutsThisWeek}/{weekTargetSessions}
-          </div>
-          <div style={{ fontSize: 10, color: '#4A6B58', marginTop: 6, lineHeight: 1.35 }}>
-            Sessions logged since Monday · target from your plan ({weekTargetSessions}/wk).
-          </div>
-        </div>
-        <div className="glass" style={{ padding: 18, borderTop: '3px solid #93C5FD' }}>
-          <div style={{ fontSize: 10, color: '#2D5B3F', fontWeight: 600 }}>📊 PROGRESS</div>
-          <div style={{
-            fontSize: 18,
-            fontWeight: 800,
-            color: progressDir === 'good' ? '#6EE7B7' : progressDir === 'bad' ? '#FB7185' : '#93C5FD',
-          }}>
-            {(cwN == null || swN == null) ? '—' : `${weightDiff >= 0 ? '+' : ''}${weightDiff.toFixed(1)} kg`}
-          </div>
-        </div>
-      </motion.div>
+          {/* B. Streak & Quick Stats */}
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: cardDelays[1] }}
+            className="card-grid"
+            style={{ marginBottom: 14 }}
+          >
+            <div className="glass" style={{ padding: 18, borderTop: '3px solid #F97316' }}>
+              <div style={{ fontSize: 10, color: '#2D5B3F', fontWeight: 600 }}>🔥 STREAK</div>
+              <div style={{ fontSize: 20, fontWeight: 800, color: '#fff' }}>
+                {workoutStreak > 0 ? `${workoutStreak} day${workoutStreak === 1 ? '' : 's'}` : '—'}
+              </div>
+              <div style={{ fontSize: 10, color: '#4A6B58', marginTop: 6, lineHeight: 1.35 }}>
+                {workoutStreak > 0 ? 'Consecutive days with a logged workout.' : 'Log a workout to start a streak.'}
+              </div>
+            </div>
+            <div className="glass" style={{ padding: 18, borderTop: '3px solid #6EE7B7' }}>
+              <div style={{ fontSize: 10, color: '#2D5B3F', fontWeight: 600 }}>⚡ THIS WEEK</div>
+              <div style={{ fontSize: 20, fontWeight: 800, color: '#fff' }}>
+                {workoutsThisWeek}/{weekTargetSessions}
+              </div>
+              <div style={{ fontSize: 10, color: '#4A6B58', marginTop: 6, lineHeight: 1.35 }}>
+                Sessions logged since Monday · target from your plan ({weekTargetSessions}/wk).
+              </div>
+            </div>
+            <div className="glass" style={{ padding: 18, borderTop: '3px solid #93C5FD' }}>
+              <div style={{ fontSize: 10, color: '#2D5B3F', fontWeight: 600 }}>📊 PROGRESS</div>
+              <div style={{
+                fontSize: 18,
+                fontWeight: 800,
+                color: progressDir === 'good' ? '#6EE7B7' : progressDir === 'bad' ? '#FB7185' : '#93C5FD',
+              }}>
+                {(cwN == null || swN == null) ? '—' : `${weightDiff >= 0 ? '+' : ''}${weightDiff.toFixed(1)} kg`}
+              </div>
+            </div>
+          </motion.div>
 
-      {deferHeavyWidgets ? (
-        <>
           <GoalDashboardWidget
             profileId={profile?.id}
             profileWeightKg={profile?.weight_kg}
@@ -1587,29 +1626,6 @@ export default function Dashboard() {
               <p style={{ fontSize: 12, color: '#FB7185', marginTop: 10, marginBottom: 0 }}>{adjustError}</p>
             )}
           </motion.div>
-        </>
-      ) : null}
-
-      <PhotoUploadModal
-        isOpen={photoModalOpen}
-        onClose={() => setPhotoModalOpen(false)}
-        profile={profile}
-        latestSessionId={latestProgressSessionId}
-        onSaved={handleProgressPhotoSaved}
-      />
-      <CompareModal
-        isOpen={compareOpen}
-        onClose={() => setCompareOpen(false)}
-        photos={progressPhotos}
-        profile={profile}
-      />
-      <ProgressPhotoDetailModal
-        isOpen={Boolean(photoDetail)}
-        photo={photoDetail}
-        onClose={() => setPhotoDetail(null)}
-        onCompare={progressPhotos.length >= 2 ? () => setCompareOpen(true) : undefined}
-        onDelete={handleDeleteProgressPhoto}
-      />
 
       {/* C. Muscle Coverage (weekly) */}
       {workoutContent?.days?.length > 0 && (
@@ -1657,244 +1673,6 @@ export default function Dashboard() {
         </div>
         <ProgressChart data={weightLogs} targetWeight={profile.target_weight} height={chartHeight} />
       </motion.div>
-
-      <div className="dashboard-desktop-2col">
-      {/* E. Today's Focus */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: cardDelays[3] }}
-      >
-        {workoutContent && workoutContent.todayExercises ? (
-          <div className="glass" style={{ padding: 0, marginBottom: 14, overflow: 'hidden' }}>
-            <div style={{ height: 3, background: 'linear-gradient(90deg, #10B981, #F97316, #EC4899)' }} />
-            <div style={{ padding: '18px 20px', borderBottom: '1px solid rgba(110,231,183,0.05)', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
-              <div>
-                <div style={{ fontSize: 16, fontWeight: 700, color: '#fff' }}>
-                  Today&apos;s Workout
-                </div>
-                <div style={{ fontSize: 13, color: '#6EE7B7', fontWeight: 600, marginTop: 4 }}>
-                  {workoutContent.todayName || new Date().toLocaleDateString('en-US', { weekday: 'long' })}
-                </div>
-              </div>
-              <div style={{ flexShrink: 0 }}>
-                <WorkoutMuscleMap
-                  exerciseNames={workoutContent.todayExercises?.map((e) => e.name) || []}
-                  view="both"
-                  size="small"
-                />
-              </div>
-            </div>
-            <div style={{ padding: '12px 20px 18px' }}>
-              {workoutContent.todayExercises.slice(0, 5).map((ex, i) => (
-                <ExerciseRow
-                  key={i}
-                  name={ex.name}
-                  sets={ex.sets}
-                  rest={ex.rest}
-                  index={i + 1}
-                  isLast={i >= Math.min(5, workoutContent.todayExercises.length) - 1}
-                />
-              ))}
-              <button
-                onClick={() => router.push('/plans')}
-                style={{
-                  width: '100%',
-                  marginTop: 16,
-                  padding: 16,
-                  borderRadius: 14,
-                  border: 'none',
-                  background: 'linear-gradient(135deg, #10B981, #6EE7B7)',
-                  color: '#070B07',
-                  fontSize: 15,
-                  fontWeight: 700,
-                  boxShadow: '0 4px 20px rgba(16,185,129,0.35)',
-                }}
-              >
-                Start Workout →
-              </button>
-              {hasWorkoutPlan && (
-                <button
-                  type="button"
-                  onClick={() => router.push('/plans?edit=workout')}
-                  style={{
-                    width: '100%',
-                    marginTop: 10,
-                    padding: 12,
-                    borderRadius: 12,
-                    border: '1px solid rgba(110,231,183,0.25)',
-                    background: 'rgba(16,185,129,0.08)',
-                    color: '#6EE7B7',
-                    fontSize: 14,
-                    fontWeight: 600,
-                  }}
-                >
-                  Edit trainer workout (exercises)
-                </button>
-              )}
-            </div>
-          </div>
-        ) : (
-          <div className="glass" style={{ padding: 24, marginBottom: 14, border: '1px dashed rgba(110,231,183,0.2)' }}>
-            <div style={{ fontSize: 28, marginBottom: 12 }}>🏋️</div>
-            <div style={{ fontSize: 16, fontWeight: 700, color: '#fff', marginBottom: 8 }}>Today&apos;s Workout</div>
-            <div style={{ fontSize: 13, color: '#94A89E', marginBottom: 16 }}>
-              {hasWorkoutPlan ? 'Log your workout or open your plan in Plans.' : 'No generated plan yet — log a session or create your program for scheduled workouts.'}
-            </div>
-            {recentWorkouts.length > 0 && (
-              <div style={{ marginBottom: 16 }}>
-                <div style={{ fontSize: 11, color: '#2D5B3F', fontWeight: 600, marginBottom: 6 }}>Recent</div>
-                {recentWorkouts.slice(0, 2).map((w) => (
-                  <div key={w.id} style={{ padding: 10, background: 'rgba(14,20,14,0.5)', borderRadius: 10, marginBottom: 6, fontSize: 12, color: '#D1FAE5' }}>
-                    {new Date(w.logged_at).toLocaleDateString()} · {(w.exercises || []).slice(0, 2).map((e) => e.name).join(', ')}
-                  </div>
-                ))}
-              </div>
-            )}
-            <div style={{ display: 'flex', gap: 10 }}>
-              <button
-                onClick={() => setWorkoutLogModalOpen(true)}
-                style={{
-                  flex: 1,
-                  padding: 14,
-                  borderRadius: 12,
-                  border: '1px solid rgba(110,231,183,0.3)',
-                  background: 'rgba(16,185,129,0.2)',
-                  color: '#6EE7B7',
-                  fontSize: 14,
-                  fontWeight: 600,
-                }}
-              >
-                Log Workout
-              </button>
-              <button
-                onClick={() => router.push('/plans?start=workout')}
-                style={{
-                  flex: 1,
-                  padding: 14,
-                  borderRadius: 12,
-                  border: 'none',
-                  background: 'linear-gradient(135deg, #10B981, #6EE7B7)',
-                  color: '#070B07',
-                  fontSize: 14,
-                  fontWeight: 600,
-                }}
-              >
-                Create Plan
-              </button>
-            </div>
-          </div>
-        )}
-      </motion.div>
-
-      {/* F. Nutrition */}
-      {(() => {
-        const parseTarget = (v) => parseInt(String(v || '').replace(/[^\d]/g, ''), 10) || 0
-        const targetCal = mealContent ? parseTarget(mealContent.dailyCalories) : 2000
-        const targetP = mealContent ? parseTarget(mealContent.protein) : 150
-        const targetC = mealContent ? parseTarget(mealContent.carbs) : 200
-        const targetF = mealContent ? parseTarget(mealContent.fats) : 65
-        const actual = todayMeals.reduce(
-          (a, m) => ({
-            cal: a.cal + (parseFloat(m.total_calories) || 0),
-            p: a.p + (parseFloat(m.total_protein) || 0),
-            c: a.c + (parseFloat(m.total_carbs) || 0),
-            f: a.f + (parseFloat(m.total_fats) || 0),
-          }),
-          { cal: 0, p: 0, c: 0, f: 0 }
-        )
-        const macros = [
-          { label: 'Calories', actual: Math.round(actual.cal), target: targetCal, color: '#6EE7B7' },
-          { label: 'Protein', actual: actual.p.toFixed(1), target: targetP, color: '#FBBF24' },
-          { label: 'Carbs', actual: actual.c.toFixed(1), target: targetC, color: '#93C5FD' },
-          { label: 'Fats', actual: actual.f.toFixed(1), target: targetF, color: '#FB7185' },
-        ]
-        return (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: cardDelays[4] }}
-            style={{ marginBottom: 14 }}
-          >
-            <div className="glass" style={{ padding: 0, overflow: 'hidden', marginBottom: 10 }}>
-              <div style={{ padding: '16px 18px', borderBottom: '1px solid rgba(110,231,183,0.05)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div>
-                  <div style={{ fontSize: 16, fontWeight: 700, color: '#fff' }}>Nutrition</div>
-                  {!mealContent && (
-                    <div style={{ fontSize: 10, color: '#5A7A68', fontWeight: 600, marginTop: 2 }}>Default targets (2000 cal) · meal plan optional</div>
-                  )}
-                </div>
-                <button
-                  onClick={() => setFoodLogModalOpen(true)}
-                  style={{
-                    padding: '8px 14px',
-                    borderRadius: 12,
-                    border: '1px solid rgba(110,231,183,0.3)',
-                    background: 'rgba(16,185,129,0.2)',
-                    color: '#6EE7B7',
-                    fontSize: 12,
-                    fontWeight: 600,
-                  }}
-                >
-                  🍽️ Log Meal
-                </button>
-              </div>
-              <div style={{ padding: '4px 18px 14px' }}>
-                {todayMeals.length > 0 ? (
-                  <div style={{ fontSize: 13, fontWeight: 700, color: '#6EE7B7', marginBottom: 8 }}>Meals Logged Today</div>
-                ) : (
-                  <div style={{ fontSize: 13, color: '#2D5B3F', marginBottom: 8 }}>No meals logged yet today</div>
-                )}
-                {todayMeals.map((meal, i) => (
-                  <div key={meal.id || i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: '1px solid rgba(110,231,183,0.04)', fontSize: 12 }}>
-                    <span style={{ color: '#D1FAE5' }}>{meal.meal_name} · {new Date(meal.logged_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</span>
-                    <span style={{ color: '#6EE7B7', fontWeight: 600 }}>{Math.round(parseFloat(meal.total_calories) || 0)} cal · {parseFloat(meal.total_protein || 0).toFixed(1)}g P</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-              {macros.map((m, i) => {
-                const pct = Math.min(1, m.actual / Math.max(m.target, 1))
-                return (
-                  <div key={i} className="glass" style={{ padding: 0, overflow: 'hidden' }}>
-                    <div style={{ height: 2, background: m.color, opacity: 0.5 }} />
-                    <div style={{ padding: '14px 16px', display: 'flex', alignItems: 'center', gap: 12 }}>
-                      <svg width={36} height={36} style={{ transform: 'rotate(-90deg)' }}>
-                        <circle cx={18} cy={18} r={14} fill="none" stroke="rgba(110,231,183,0.1)" strokeWidth={4} />
-                        <circle cx={18} cy={18} r={14} fill="none" stroke={m.color} strokeWidth={4} strokeDasharray={`${pct * 88} 88`} strokeLinecap="round" />
-                      </svg>
-                      <div>
-                        <div style={{ fontSize: 11, color: '#2D5B3F', fontWeight: 600 }}>{m.label}</div>
-                        <div style={{ fontSize: 18, fontWeight: 800, color: m.color }}>{m.actual}/{m.target}</div>
-                      </div>
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-            {!mealContent && (
-              <button
-                onClick={() => router.push('/plans?start=meal')}
-                style={{
-                  width: '100%',
-                  marginTop: 10,
-                  padding: 14,
-                  borderRadius: 12,
-                  border: '1px dashed rgba(249,115,22,0.3)',
-                  background: 'transparent',
-                  color: '#F97316',
-                  fontSize: 13,
-                  fontWeight: 600,
-                }}
-              >
-                Create Meal Plan for personalized targets →
-              </button>
-            )}
-          </motion.div>
-        )
-      })()}
-      </div>
 
       {/* G. Meal Plan Meals (only when plan exists) */}
       {mealContent && mealContent.meals?.length > 0 && (
@@ -2081,6 +1859,30 @@ export default function Dashboard() {
           Plans &amp; photos are up top too — scroll less, tap more.
         </div>
       </motion.div>
+
+        </>
+      ) : null}
+
+      <PhotoUploadModal
+        isOpen={photoModalOpen}
+        onClose={() => setPhotoModalOpen(false)}
+        profile={profile}
+        latestSessionId={latestProgressSessionId}
+        onSaved={handleProgressPhotoSaved}
+      />
+      <CompareModal
+        isOpen={compareOpen}
+        onClose={() => setCompareOpen(false)}
+        photos={progressPhotos}
+        profile={profile}
+      />
+      <ProgressPhotoDetailModal
+        isOpen={Boolean(photoDetail)}
+        photo={photoDetail}
+        onClose={() => setPhotoDetail(null)}
+        onCompare={progressPhotos.length >= 2 ? () => setCompareOpen(true) : undefined}
+        onDelete={handleDeleteProgressPhoto}
+      />
 
       <WeightModal
         open={weightModalOpen}

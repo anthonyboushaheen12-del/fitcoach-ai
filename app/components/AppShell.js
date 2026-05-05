@@ -8,7 +8,7 @@ import { useAuth } from './AuthProvider'
 const SIDEBAR_W = 220
 const PRIMARY_TABS = [
   { id: '/dashboard', icon: '\uD83C\uDFE0', label: 'Home' },
-  { id: '/plans', icon: '\uD83D\uDCCB', label: 'Plans' },
+  { id: '/plans', icon: '\uD83D\uDCCB', label: 'Program' },
   { id: '/settings', icon: '\u2699\uFE0F', label: 'Settings' },
 ]
 const SECONDARY_TABS = [

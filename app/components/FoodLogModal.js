@@ -67,6 +67,9 @@ export default function FoodLogModal({ open, onClose, profileId, onLog }) {
   const [describeHint, setDescribeHint] = useState(null)
   /** Last AI aggregate from photo or text analysis (for comparison with line-item totals). */
   const [analysisTotals, setAnalysisTotals] = useState(null)
+  const [includePhotoWithLog, setIncludePhotoWithLog] = useState(false)
+  /** Snapshot from last compressed meal photo (for optional persist on log). */
+  const [mealSnapForLog, setMealSnapForLog] = useState(null)
 
   const debouncedSearch = useDebounce(search, 300)
 
@@ -78,6 +81,8 @@ export default function FoodLogModal({ open, onClose, profileId, onLog }) {
       setDescribeHint(null)
       setDescribeText('')
       setAnalysisTotals(null)
+      setIncludePhotoWithLog(false)
+      setMealSnapForLog(null)
     }
   }, [open])
 
@@ -120,6 +125,7 @@ export default function FoodLogModal({ open, onClose, profileId, onLog }) {
     setPhotoHint(null)
     try {
       const { base64, mediaType } = await compressImageForUpload(file)
+      setMealSnapForLog({ base64, mediaType })
       const res = await fetch('/api/analyze-meal', {
         method: 'POST',
         headers: await authJsonHeaders(),
@@ -148,11 +154,27 @@ export default function FoodLogModal({ open, onClose, profileId, onLog }) {
           carbs: Number(a?.totalCarbsG),
           fats: Number(a?.totalFatsG),
         })
+        setIncludePhotoWithLog(true)
       }
     } catch {
       setPhotoHint('Could not analyze photo.')
     } finally {
       setPhotoBusy(false)
+    }
+  }
+
+  async function handleAttachPhotoOnly(e) {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file || !file.type.startsWith('image/')) return
+    setPhotoHint(null)
+    try {
+      const { base64, mediaType } = await compressImageForUpload(file)
+      setMealSnapForLog({ base64, mediaType })
+      setIncludePhotoWithLog(true)
+      setPhotoHint('Photo attached — it will save with this meal when you tap Log meal.')
+    } catch {
+      setPhotoHint('Could not read photo.')
     }
   }
 
@@ -230,30 +252,40 @@ export default function FoodLogModal({ open, onClose, profileId, onLog }) {
 
   async function handleLog() {
     if (!profileId) return
+    if (includePhotoWithLog && !mealSnapForLog?.base64) {
+      setPhotoHint('Choose a meal photo first, or turn off “Save photo with meal”.')
+      return
+    }
     setSaving(true)
     try {
       const mealLabel = MEAL_TYPES.find((m) => m.id === mealType)?.label || mealType
+      const headers = await authJsonHeaders()
+      const payload = {
+        profileId,
+        mealName: mealLabel,
+        foodItems: selected.map((s) => ({
+          name: s.name,
+          grams: s.grams,
+          per100g: s.per100g,
+          calories: Math.round((s.per100g?.calories || 0) * (s.grams / 100)),
+          protein: Math.round((s.per100g?.protein || 0) * (s.grams / 100) * 10) / 10,
+          carbs: Math.round((s.per100g?.carbs || 0) * (s.grams / 100) * 10) / 10,
+          fats: Math.round((s.per100g?.fats || 0) * (s.grams / 100) * 10) / 10,
+        })),
+        totalCalories: Math.round(totals.calories),
+        totalProtein: Math.round(totals.protein * 10) / 10,
+        totalCarbs: Math.round(totals.carbs * 10) / 10,
+        totalFats: Math.round(totals.fats * 10) / 10,
+        mealType,
+      }
+      if (includePhotoWithLog && mealSnapForLog?.base64) {
+        payload.mealPhotoBase64 = mealSnapForLog.base64
+        payload.mealPhotoMediaType = mealSnapForLog.mediaType || 'image/jpeg'
+      }
       await fetch('/api/meal-log', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          profileId,
-          mealName: mealLabel,
-          foodItems: selected.map((s) => ({
-            name: s.name,
-            grams: s.grams,
-            per100g: s.per100g,
-            calories: Math.round((s.per100g?.calories || 0) * (s.grams / 100)),
-            protein: Math.round((s.per100g?.protein || 0) * (s.grams / 100) * 10) / 10,
-            carbs: Math.round((s.per100g?.carbs || 0) * (s.grams / 100) * 10) / 10,
-            fats: Math.round((s.per100g?.fats || 0) * (s.grams / 100) * 10) / 10,
-          })),
-          totalCalories: Math.round(totals.calories),
-          totalProtein: Math.round(totals.protein * 10) / 10,
-          totalCarbs: Math.round(totals.carbs * 10) / 10,
-          totalFats: Math.round(totals.fats * 10) / 10,
-          mealType,
-        }),
+        headers,
+        body: JSON.stringify(payload),
       })
       onLog?.()
       onClose()
@@ -414,6 +446,50 @@ export default function FoodLogModal({ open, onClose, profileId, onLog }) {
                 </span>
               </div>
             )}
+
+          {mealSnapForLog?.base64 ? (
+            <label
+              style={{
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: 10,
+                fontSize: 12,
+                color: '#A7C4B8',
+                marginBottom: 12,
+                cursor: 'pointer',
+                lineHeight: 1.45,
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={includePhotoWithLog}
+                onChange={(e) => setIncludePhotoWithLog(e.target.checked)}
+                style={{ marginTop: 3 }}
+              />
+              <span>Save this photo with the meal (thumbnail in today&apos;s list)</span>
+            </label>
+          ) : null}
+
+          <label
+            style={{
+              display: 'block',
+              marginBottom: 12,
+              fontSize: 12,
+              color: '#6B8F7A',
+              cursor: 'pointer',
+            }}
+          >
+            <input
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              style={{ display: 'none' }}
+              onChange={handleAttachPhotoOnly}
+            />
+            <span style={{ textDecoration: 'underline' }}>Attach photo only</span>
+            <span style={{ display: 'block', fontSize: 11, marginTop: 4, color: '#3D5248' }}>
+              Skip AI scan — thumbnail only when you log (add foods below).
+            </span>
+          </label>
 
           <div style={{ marginBottom: 12 }}>
             <label

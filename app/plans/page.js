@@ -368,6 +368,8 @@ export default function Plans() {
 
   useEffect(() => {
     const start = searchParams.get('start')
+    const customize = searchParams.get('customize') === '1' || searchParams.get('customize') === 'true'
+    if (!customize) return
     if (start === 'workout') {
       setWorkoutQuizStep(WORKOUT_QUIZ_BODY_STEP)
       setView('workout-quiz')
