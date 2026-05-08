@@ -355,6 +355,12 @@ export default function Plans() {
   const [workoutSaveBusy, setWorkoutSaveBusy] = useState(false)
   const [workoutSaveError, setWorkoutSaveError] = useState(null)
   const workoutEditFromQueryRef = useRef(false)
+  const [splitCritiqueText, setSplitCritiqueText] = useState('')
+  const [splitCritiqueBusy, setSplitCritiqueBusy] = useState(false)
+  const [splitCritiqueError, setSplitCritiqueError] = useState(null)
+  const [splitCritiqueResult, setSplitCritiqueResult] = useState(null)
+  const [splitApplyBusy, setSplitApplyBusy] = useState(false)
+  const [splitApplyError, setSplitApplyError] = useState(null)
 
   useEffect(() => {
     if (!user) {
@@ -401,6 +407,13 @@ export default function Plans() {
     if (profile?.preferences?.workout) setWorkoutPrefs(profile.preferences.workout)
     if (profile?.preferences?.meal) setMealPrefs(profile.preferences.meal)
   }, [profile?.preferences])
+
+  useEffect(() => {
+    const raw = profile?.preferences?.workout?.currentSplitText
+    if (typeof raw === 'string' && raw.trim() && !splitCritiqueText.trim()) {
+      setSplitCritiqueText(raw)
+    }
+  }, [profile?.preferences?.workout?.currentSplitText])
 
   useEffect(() => {
     if (view !== 'workout-quiz') return
@@ -623,6 +636,74 @@ export default function Plans() {
       setPlansMealContextHint('Could not analyze description.')
     } finally {
       setPlansMealContextBusy(null)
+    }
+  }
+
+  async function runSplitCritique() {
+    if (!profile?.id) return
+    const text = splitCritiqueText?.trim()
+    if (!text) {
+      setSplitCritiqueError('Paste your current split/routine first.')
+      return
+    }
+    setSplitCritiqueBusy(true)
+    setSplitCritiqueError(null)
+    setSplitCritiqueResult(null)
+    setSplitApplyError(null)
+    try {
+      const res = await fetch('/api/critique-split', {
+        method: 'POST',
+        headers: await jsonHeadersWithAuth(),
+        body: JSON.stringify({
+          profileId: profile.id,
+          profile,
+          trainerId: profile.trainer || 'bro',
+          onboardingContext: profile?.onboarding_context,
+          currentSplitText: text,
+          workoutPreferences: workoutPrefs,
+        }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || data.details || 'Could not critique your split')
+      }
+      setSplitCritiqueResult({
+        summary: data.summary,
+        issues: data.issues,
+        questions: data.questions,
+        correctedWorkoutPlan: data.correctedWorkoutPlan,
+      })
+    } catch (e) {
+      setSplitCritiqueError(e?.message || 'Could not critique your split')
+    } finally {
+      setSplitCritiqueBusy(false)
+    }
+  }
+
+  async function applySplitFix() {
+    if (!profile?.id || !splitCritiqueResult?.correctedWorkoutPlan) return
+    setSplitApplyBusy(true)
+    setSplitApplyError(null)
+    try {
+      const res = await fetch('/api/workout-plan', {
+        method: 'POST',
+        headers: await jsonHeadersWithAuth(),
+        body: JSON.stringify({
+          profileId: profile.id,
+          content: splitCritiqueResult.correctedWorkoutPlan,
+          trainerId: profile.trainer || 'bro',
+        }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok || !data.success) throw new Error(data.error || 'Could not apply changes')
+      await loadPlans(profile.id)
+      await refreshProfile()
+      setView('overview')
+      setSplitCritiqueResult(null)
+    } catch (e) {
+      setSplitApplyError(e?.message || 'Could not apply changes')
+    } finally {
+      setSplitApplyBusy(false)
     }
   }
 
@@ -1425,6 +1506,29 @@ export default function Plans() {
             >
               Generate My Workout Plan
             </button>
+            <button
+              type="button"
+              onClick={() => {
+                setView('split-critique')
+                setSplitCritiqueError(null)
+                setSplitApplyError(null)
+              }}
+              disabled={generating || recommendLoading}
+              style={{
+                width: '100%',
+                marginTop: 10,
+                padding: 14,
+                borderRadius: 14,
+                border: '1px solid rgba(110,231,183,0.25)',
+                background: 'rgba(14,20,14,0.45)',
+                color: '#6EE7B7',
+                fontSize: 13,
+                fontWeight: 700,
+                opacity: generating || recommendLoading ? 0.6 : 1,
+              }}
+            >
+              Already have a split? Critique & fix it →
+            </button>
           </div>
         ) : (
           <button
@@ -1446,6 +1550,133 @@ export default function Plans() {
             Continue →
           </button>
         )}
+        </div>
+      </div>
+    )
+  }
+
+  if (view === 'split-critique') {
+    const trainer = getTrainer(profile?.trainer || 'bro')
+    const corrected = splitCritiqueResult?.correctedWorkoutPlan
+    return (
+      <div className="app-container" style={{ padding: '18px 0 24px' }}>
+        <div className="plans-quiz-inner">
+          <button
+            type="button"
+            onClick={() => {
+              setView('workout-quiz')
+              setSplitCritiqueError(null)
+              setSplitApplyError(null)
+            }}
+            style={{ background: 'none', border: 'none', color: '#6EE7B7', fontSize: 14, fontWeight: 600, marginBottom: 16 }}
+          >
+            ← Back
+          </button>
+          <div className="glass" style={{ padding: 20, border: `1px solid ${trainer.color}22`, borderTop: `3px solid ${trainer.color}` }}>
+            <div style={{ fontSize: 18, fontWeight: 800, color: '#fff', marginBottom: 6 }}>
+              Critique & fix my current split
+            </div>
+            <div style={{ fontSize: 12, color: '#2D5B3F', lineHeight: 1.5, marginBottom: 14 }}>
+              Paste your weekly routine and {trainer.name} will point out issues and generate an improved version you can apply.
+            </div>
+
+            <textarea
+              value={splitCritiqueText}
+              onChange={(e) => setSplitCritiqueText(e.target.value)}
+              placeholder={'Example:\nMon Push: Bench 4x8, OHP 3x10...\nTue Pull...\nWed Legs...\n\nOr just: PPL 6x/week + main lifts.'}
+              rows={8}
+              style={{ ...inputStyle, resize: 'vertical', minHeight: 180, marginBottom: 12 }}
+              disabled={splitCritiqueBusy || splitApplyBusy}
+            />
+
+            {(splitCritiqueError || splitApplyError) && (
+              <div style={{ color: '#FB7185', fontSize: 13, marginBottom: 12 }}>
+                {splitCritiqueError || splitApplyError}
+              </div>
+            )}
+
+            <button
+              type="button"
+              onClick={runSplitCritique}
+              disabled={splitCritiqueBusy || splitApplyBusy || !splitCritiqueText.trim()}
+              style={{
+                width: '100%',
+                padding: 16,
+                borderRadius: 14,
+                border: 'none',
+                background: 'linear-gradient(135deg, #10B981, #6EE7B7)',
+                color: '#070B07',
+                fontSize: 15,
+                fontWeight: 800,
+                opacity: splitCritiqueBusy || splitApplyBusy || !splitCritiqueText.trim() ? 0.65 : 1,
+                marginBottom: 14,
+              }}
+            >
+              {splitCritiqueBusy ? `${trainer.emoji} Reviewing…` : `${trainer.emoji} Critique & fix`}
+            </button>
+
+            {splitCritiqueResult && (
+              <div style={{ marginTop: 6 }}>
+                {splitCritiqueResult.summary && (
+                  <div style={{ fontSize: 13, color: '#E2FBE8', lineHeight: 1.6, marginBottom: 12 }}>
+                    {splitCritiqueResult.summary}
+                  </div>
+                )}
+
+                {Array.isArray(splitCritiqueResult.issues) && splitCritiqueResult.issues.length > 0 && (
+                  <div className="glass-sm" style={{ padding: 14, marginBottom: 12, border: '1px solid rgba(110,231,183,0.08)' }}>
+                    <div style={{ fontSize: 12, fontWeight: 800, color: '#6EE7B7', marginBottom: 8 }}>
+                      Key issues
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                      {splitCritiqueResult.issues.slice(0, 6).map((it, i) => (
+                        <div key={i} style={{ fontSize: 12, color: '#D1FAE5', lineHeight: 1.5 }}>
+                          <div style={{ fontWeight: 800, color: '#fff' }}>{it?.title || 'Issue'}</div>
+                          {it?.whyItMatters && <div style={{ color: '#A7C4B8' }}>{it.whyItMatters}</div>}
+                          {it?.fix && <div style={{ marginTop: 2 }}><span style={{ color: '#6EE7B7', fontWeight: 800 }}>Fix:</span> {it.fix}</div>}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {corrected && (
+                  <div className="glass-sm" style={{ padding: 14, marginBottom: 12, border: '1px solid rgba(110,231,183,0.08)' }}>
+                    <div style={{ fontSize: 12, fontWeight: 800, color: '#6EE7B7', marginBottom: 8 }}>
+                      Corrected split preview
+                    </div>
+                    <div style={{ fontSize: 12, color: '#A7C4B8', marginBottom: 10 }}>
+                      {corrected.name || 'Workout Plan'} · {corrected.daysPerWeek || 4} days/week
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      {(Array.isArray(corrected.split) ? corrected.split : []).slice(0, 10).map((s, i) => (
+                        <div key={i} style={{ fontSize: 12, color: '#D1FAE5' }}>• {s}</div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <button
+                  type="button"
+                  onClick={applySplitFix}
+                  disabled={splitApplyBusy || splitCritiqueBusy || !corrected}
+                  style={{
+                    width: '100%',
+                    padding: 16,
+                    borderRadius: 14,
+                    border: 'none',
+                    background: corrected ? `linear-gradient(135deg, ${trainer.color}, #6EE7B7)` : 'rgba(110,231,183,0.2)',
+                    color: corrected ? '#070B07' : '#2D5B3F',
+                    fontSize: 14,
+                    fontWeight: 800,
+                    opacity: splitApplyBusy || splitCritiqueBusy || !corrected ? 0.65 : 1,
+                  }}
+                >
+                  {splitApplyBusy ? 'Applying…' : 'Apply this fixed split to my workout plan'}
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </div>
     )
