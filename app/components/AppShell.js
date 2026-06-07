@@ -7,13 +7,9 @@ import { useAuth } from './AuthProvider'
 
 const SIDEBAR_W = 220
 const PRIMARY_TABS = [
-  { id: '/dashboard', icon: '\uD83C\uDFE0', label: 'Home' },
+  { id: '/dashboard', icon: '\uD83C\uDFE0', label: 'Today' },
   { id: '/plans', icon: '\uD83D\uDCCB', label: 'Program' },
   { id: '/settings', icon: '\u2699\uFE0F', label: 'Settings' },
-]
-const SECONDARY_TABS = [
-  { id: '/log-meal', icon: '\uD83E\uDD57', label: 'Log meal' },
-  { id: '/goals', icon: '\uD83C\uDFAF', label: 'AI Goals' },
 ]
 
 export default function AppShell({ children }) {
@@ -35,7 +31,6 @@ export default function AppShell({ children }) {
     router.prefetch('/dashboard')
     router.prefetch('/plans')
     router.prefetch('/settings')
-    router.prefetch('/goals')
   }, [authLoading, user, router])
 
   const hideNav = pathname === '/' || pathname === '/onboarding'
@@ -115,51 +110,6 @@ export default function AppShell({ children }) {
                   }}
                 >
                   <span style={{ fontSize: 20 }}>{tab.icon}</span>
-                  {tab.label}
-                </button>
-              )
-            })}
-            <div
-              style={{
-                fontSize: 10,
-                fontWeight: 700,
-                color: '#2D5B3F',
-                letterSpacing: 0.6,
-                marginTop: 12,
-                marginBottom: 4,
-                paddingLeft: 8,
-              }}
-            >
-              MORE
-            </div>
-            {SECONDARY_TABS.map((tab) => {
-              const isActive = pathname === tab.id
-              return (
-                <button
-                  key={tab.id}
-                  type="button"
-                  onClick={() => router.push(tab.id)}
-                  className="app-sidebar-link"
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 12,
-                    width: '100%',
-                    padding: '10px 16px',
-                    border: 'none',
-                    borderRadius: 12,
-                    background: isActive ? 'rgba(110,231,183,0.06)' : 'transparent',
-                    borderLeft: isActive ? '4px solid rgba(110,231,183,0.5)' : '4px solid transparent',
-                    marginLeft: -4,
-                    paddingLeft: 20,
-                    cursor: 'pointer',
-                    color: isActive ? '#8BC9A8' : '#5C7066',
-                    fontSize: 13,
-                    fontWeight: 600,
-                    textAlign: 'left',
-                  }}
-                >
-                  <span style={{ fontSize: 18 }}>{tab.icon}</span>
                   {tab.label}
                 </button>
               )

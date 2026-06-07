@@ -11,37 +11,24 @@ import { useAuth } from '../components/AuthProvider'
 import BrandedAuthLoading from '../components/BrandedAuthLoading'
 import ProfileLoadRecovery from '../components/ProfileLoadRecovery'
 import { useProfileResolutionTimeout } from '../hooks/useProfileResolutionTimeout'
-import BodyImageSlot from '../components/BodyImageSlot'
 import DailyMacrosCard from '../components/DailyMacrosCard'
 import TodaysMealsCard from '../components/TodaysMealsCard'
-import QuickCoachPanel from '../components/QuickCoachPanel'
 
-const ProgressChart = dynamic(() => import('../components/ProgressChart'), { ssr: false, loading: () => null })
-const WeightModal = dynamic(() => import('../components/WeightModal'), { ssr: false, loading: () => null })
 const TrainerModal = dynamic(() => import('../components/TrainerModal'), { ssr: false, loading: () => null })
-const WorkoutMuscleMap = dynamic(() => import('../components/WorkoutMuscleMap'), { ssr: false, loading: () => null })
 const FoodLogModal = dynamic(() => import('../components/FoodLogModal'), { ssr: false, loading: () => null })
 const WorkoutHubCard = dynamic(() => import('../components/WorkoutHubCard'), { ssr: false, loading: () => null })
 const LogWorkoutModal = dynamic(() => import('../components/LogWorkoutModal'), { ssr: false, loading: () => null })
 const ProgressTimeline = dynamic(() => import('../components/ProgressTimeline'), { ssr: false, loading: () => null })
 const PhotoUploadModal = dynamic(() => import('../components/PhotoUploadModal'), { ssr: false, loading: () => null })
 const CompareModal = dynamic(() => import('../components/CompareModal'), { ssr: false, loading: () => null })
-const ProgressPhotoDetailModal = dynamic(() => import('../components/ProgressPhotoDetailModal'), {
-  ssr: false,
-  loading: () => null,
-})
+const ProgressPhotoDetailModal = dynamic(
+  () => import('../components/ProgressPhotoDetailModal'),
+  { ssr: false, loading: () => null }
+)
 const BodyFatLineChart = dynamic(
   () => import('../components/ProgressCharts').then((m) => m.BodyFatLineChart),
   { ssr: false, loading: () => null }
 )
-const GoalDashboardWidget = dynamic(() => import('../components/GoalDashboardWidget'), {
-  ssr: false,
-  loading: () => null,
-})
-const BodyweightSkillTracker = dynamic(() => import('../components/BodyweightSkillTracker'), {
-  ssr: false,
-  loading: () => null,
-})
 
 async function jsonHeadersWithAuth() {
   const headers = {}
@@ -52,29 +39,18 @@ async function jsonHeadersWithAuth() {
   return headers
 }
 
-async function fetchDashboardPlansWeight([, profileId]) {
-  if (!supabase) return { plansData: [], logs: [] }
-  const runQueries = () =>
-    Promise.all([
-      supabase
-        .from('plans')
-        .select('id, profile_id, type, content, active, created_at')
-        .eq('profile_id', profileId)
-        .eq('active', true),
-      supabase
-        .from('weight_logs')
-        .select('weight_kg, logged_at, created_at, profile_id')
-        .eq('profile_id', profileId)
-        .order('created_at', { ascending: true })
-        .limit(60),
-    ])
-  const [plansResult, logsResult] = await Promise.race([
-    runQueries(),
+async function fetchDashboardPlans([, profileId]) {
+  if (!supabase) return []
+  const res = await Promise.race([
+    supabase
+      .from('plans')
+      .select('id, profile_id, type, content, active, created_at')
+      .eq('profile_id', profileId)
+      .eq('active', true),
     new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 10000)),
   ])
-  if (plansResult?.error) throw new Error(plansResult.error.message || 'plans error')
-  if (logsResult?.error) throw new Error(logsResult.error.message || 'weight_logs error')
-  return { plansData: plansResult?.data || [], logs: logsResult?.data || [] }
+  if (res?.error) throw new Error(res.error.message || 'plans error')
+  return res?.data || []
 }
 
 function getGreeting(name) {
@@ -85,7 +61,6 @@ function getGreeting(name) {
   return { text: `Rest up, ${name}`, emoji: '🌙' }
 }
 
-/** True only when we have a real generated plan (not just a stale/empty row). */
 function hasUsableWorkoutPlan(workoutPlanRow) {
   const c = workoutPlanRow?.content
   if (!c || typeof c !== 'object') return false
@@ -105,173 +80,235 @@ function hasUsableMealPlan(mealPlanRow) {
   return false
 }
 
-const DASHBOARD_TIPS = [
-  'Protein at breakfast makes it easier to hit your daily target.',
-  'A 10-minute walk after meals helps energy and digestion.',
-  'Train close to failure on the last set — not every set.',
-  'Sleep is when muscle repairs: aim for a consistent wake time.',
-  'Front, side, and back photos monthly beat the scale alone.',
-  'If the gym is packed, swap machines for dumbbells — same muscle, less wait.',
-  'Hydrate before coffee — your training will feel easier.',
-]
-
-function workoutDayKey(loggedAt) {
-  const raw = loggedAt
-  const d = typeof raw === 'string' ? new Date(raw) : new Date(raw || Date.now())
-  if (Number.isNaN(d.getTime())) return null
-  return d.toISOString().split('T')[0]
-}
-
-/** Consecutive days with ≥1 logged workout, counting back from today or yesterday. */
-function computeWorkoutStreak(workouts) {
-  if (!workouts?.length) return 0
-  const daySet = new Set(workouts.map((w) => workoutDayKey(w.logged_at)).filter(Boolean))
-  const cur = new Date()
-  cur.setHours(12, 0, 0, 0)
-  const todayStr = cur.toISOString().split('T')[0]
-  if (!daySet.has(todayStr)) {
-    cur.setDate(cur.getDate() - 1)
-  }
-  let streak = 0
-  for (let i = 0; i < 120; i++) {
-    const key = cur.toISOString().split('T')[0]
-    if (daySet.has(key)) streak++
-    else break
-    cur.setDate(cur.getDate() - 1)
-  }
-  return streak
-}
-
-function startOfWeekMondayMs() {
-  const now = new Date()
-  const day = now.getDay()
-  const offset = day === 0 ? -6 : 1 - day
-  const monday = new Date(now.getFullYear(), now.getMonth(), now.getDate() + offset, 0, 0, 0, 0)
-  return monday.getTime()
-}
-
-function countWorkoutsThisWeek(workouts) {
-  const start = startOfWeekMondayMs()
-  return (workouts || []).filter((w) => {
-    const t = new Date(w.logged_at).getTime()
-    return !Number.isNaN(t) && t >= start
-  }).length
-}
-
-function pickDashboardTip() {
-  const day = Math.floor(Date.now() / 86400000)
-  return DASHBOARD_TIPS[day % DASHBOARD_TIPS.length]
-}
-
-function truncate(str, max) {
-  if (str == null || typeof str !== 'string') return ''
-  const t = str.trim()
-  if (t.length <= max) return t
-  return `${t.slice(0, max - 1)}…`
-}
-
-function DashboardAtAGlance({ profileRow, coachFirstName }) {
-  const now = new Date()
-  const dateLine = now.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })
-  const goalLine =
-    profileRow?.goal && String(profileRow.goal).trim().length > 0
-      ? truncate(profileRow.goal, 140)
-      : 'Set your goal in Settings so your coach can stay aligned with you.'
-  const tip = pickDashboardTip()
+function Toast({ message }) {
+  if (!message) return null
   return (
-    <div
-      className="glass"
+    <motion.div
+      initial={{ opacity: 0, y: -20 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0 }}
       style={{
-        padding: 16,
-        marginBottom: 14,
-        border: '1px solid rgba(110,231,183,0.12)',
-        background: 'linear-gradient(145deg, rgba(16,185,129,0.08), rgba(14,20,14,0.85))',
+        position: 'fixed',
+        top: 20,
+        left: '50%',
+        transform: 'translateX(-50%)',
+        padding: '12px 20px',
+        background: 'rgba(14,20,14,0.95)',
+        border: '1px solid rgba(110,231,183,0.3)',
+        borderRadius: 12,
+        color: '#6EE7B7',
+        fontSize: 14,
+        fontWeight: 600,
+        zIndex: 50,
+        boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
       }}
     >
-      <div style={{ fontSize: 11, color: '#6EE7B7', fontWeight: 700, letterSpacing: 0.4, marginBottom: 6 }}>
-        {dateLine}
-      </div>
-      <div style={{ fontSize: 15, fontWeight: 800, color: '#fff', marginBottom: 8 }}>
-        You&apos;re in the right place{coachFirstName ? ` — ${coachFirstName} has your back` : ''}.
-      </div>
-      <div style={{ fontSize: 12, color: '#B8D4C4', lineHeight: 1.5, marginBottom: 12 }}>
-        <span style={{ color: '#2D5B3F', fontWeight: 600 }}>Goal · </span>
-        {goalLine}
-      </div>
-      <div
-        style={{
-          padding: '12px 14px',
-          borderRadius: 12,
-          background: 'rgba(8,12,8,0.55)',
-          border: '1px solid rgba(110,231,183,0.08)',
-        }}
-      >
-        <div style={{ fontSize: 10, color: '#2D5B3F', fontWeight: 700, marginBottom: 4 }}>TIP OF THE DAY</div>
-        <div style={{ fontSize: 13, color: '#D1FAE5', lineHeight: 1.45 }}>{tip}</div>
-      </div>
-    </div>
+      {message}
+    </motion.div>
   )
 }
 
-function shortcutPillStyle(active) {
-  return {
-    flex: '0 0 auto',
-    padding: '10px 14px',
-    borderRadius: 999,
-    border: active ? '1px solid rgba(110,231,183,0.35)' : '1px solid rgba(110,231,183,0.12)',
-    background: active ? 'rgba(16,185,129,0.18)' : 'rgba(14,20,14,0.6)',
-    color: active ? '#6EE7B7' : '#A7C4B8',
-    fontSize: 12,
-    fontWeight: 600,
-    cursor: 'pointer',
-    display: 'flex',
-    alignItems: 'center',
-    gap: 6,
-    whiteSpace: 'nowrap',
-  }
+function DashboardHeader({ greeting, trainer, hasWorkoutPlan, onPhoto, onTrainer }) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}
+    >
+      <div>
+        <h1 style={{ fontSize: 22, fontWeight: 800, letterSpacing: -0.8 }}>
+          <span style={{ color: '#6EE7B7' }}>Fit</span>
+          <span style={{ color: '#fff' }}>Coach</span>
+          <span className="gradient-accent" style={{ fontSize: 12, fontWeight: 600, marginLeft: 6 }}>AI</span>
+        </h1>
+        <p style={{ fontSize: 14, color: '#D1FAE5', fontWeight: 500, marginTop: 4 }}>
+          {greeting.text} {greeting.emoji}
+        </p>
+        {hasWorkoutPlan ? (
+          <p style={{ fontSize: 13, fontWeight: 600, marginTop: 6, color: trainer.color || '#6EE7B7' }}>
+            Coached by {trainer.name} {trainer.emoji}
+          </p>
+        ) : (
+          <p style={{ fontSize: 12, fontWeight: 600, marginTop: 6, color: '#6B8F7A' }}>
+            Log meals and photos below — set up your program when ready
+          </p>
+        )}
+      </div>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', flexShrink: 0 }}>
+        <button
+          type="button"
+          aria-label="Add progress photo"
+          onClick={onPhoto}
+          style={{
+            width: 48,
+            height: 48,
+            borderRadius: 16,
+            background: 'rgba(14,20,14,0.55)',
+            backdropFilter: 'blur(24px)',
+            border: '1px solid rgba(110,231,183,0.1)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: 22,
+            cursor: 'pointer',
+          }}
+        >
+          📷
+        </button>
+        <button
+          type="button"
+          aria-label="Switch trainer"
+          onClick={onTrainer}
+          style={{
+            width: 48,
+            height: 48,
+            borderRadius: 16,
+            background: 'rgba(14,20,14,0.55)',
+            backdropFilter: 'blur(24px)',
+            border: '1px solid rgba(110,231,183,0.1)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: 24,
+            cursor: 'pointer',
+          }}
+        >
+          {trainer.emoji}
+        </button>
+      </div>
+    </motion.div>
+  )
 }
 
-function DashboardShortcutStrip({
-  router,
-  chatLabel,
-  onOpenFood,
-  onOpenWorkout,
-  onOpenPhoto,
-}) {
-  const items = [
-    { icon: '📋', label: 'Plans', onClick: () => router.push('/plans') },
-    { icon: '🎯', label: 'Goals', onClick: () => router.push('/goals') },
-    { icon: '💬', label: 'Coach', sub: chatLabel, onClick: () => router.push('/plans?coach=1') },
-    { icon: '🥗', label: 'Log meal', onClick: onOpenFood },
-    { icon: '🏋️', label: 'Log workout', onClick: onOpenWorkout },
-    { icon: '📷', label: 'Photo', onClick: onOpenPhoto },
-    { icon: '⚙️', label: 'Settings', onClick: () => router.push('/settings') },
-  ]
+function ProgressPhotosSection({ photos, onAdd, onSelectPhoto }) {
   return (
-    <div style={{ marginBottom: 16 }}>
-      <div style={{ fontSize: 11, color: '#2D5B3F', fontWeight: 700, marginBottom: 8 }}>QUICK ACTIONS</div>
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: 0.3 }}
+      className="glass"
+      style={{ padding: 0, marginBottom: 14, overflow: 'hidden' }}
+    >
       <div
         style={{
+          padding: '16px 18px',
           display: 'flex',
-          gap: 8,
-          overflowX: 'auto',
-          paddingBottom: 6,
-          marginBottom: 2,
-          WebkitOverflowScrolling: 'touch',
-          scrollbarWidth: 'none',
+          justifyContent: 'space-between',
+          alignItems: 'flex-start',
+          gap: 12,
+          borderBottom: '1px solid rgba(110,231,183,0.05)',
         }}
       >
-        {items.map((item) => (
-          <button key={item.label} type="button" onClick={item.onClick} style={shortcutPillStyle(false)}>
-            <span>{item.icon}</span>
-            <span>
-              {item.label}
-              {item.sub ? <span style={{ opacity: 0.85 }}> · {item.sub}</span> : null}
-            </span>
-          </button>
-        ))}
+        <div>
+          <div style={{ fontSize: 16, fontWeight: 700, color: '#fff' }}>Body check-in</div>
+          <div style={{ fontSize: 11, color: '#4A6B58', marginTop: 4, lineHeight: 1.4 }}>
+            Upload photos for AI physique assessment and progress tracking.
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={onAdd}
+          style={{
+            padding: '6px 14px',
+            borderRadius: 100,
+            background: 'rgba(110,231,183,0.1)',
+            border: '1px solid rgba(110,231,183,0.15)',
+            color: '#6EE7B7',
+            fontSize: 11,
+            fontWeight: 700,
+            flexShrink: 0,
+            cursor: 'pointer',
+          }}
+        >
+          + Add photo
+        </button>
       </div>
-    </div>
+      <ProgressTimeline photos={photos} onAdd={onAdd} onSelectPhoto={onSelectPhoto} />
+      {photos.length >= 2 && (
+        <div style={{ padding: '0 18px 16px' }}>
+          <div style={{ fontSize: 12, color: '#2D5B3F', fontWeight: 600, marginBottom: 8 }}>
+            Body fat trend (estimated)
+          </div>
+          <BodyFatLineChart photos={photos} height={140} />
+        </div>
+      )}
+    </motion.div>
+  )
+}
+
+function AskCoachCard({ trainer, onClick }) {
+  const shortName = (trainer.name || 'Coach').split(/\s+/).pop()
+  return (
+    <motion.button
+      type="button"
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: 0.35 }}
+      onClick={onClick}
+      className="glass"
+      style={{
+        width: '100%',
+        padding: 16,
+        marginBottom: 14,
+        border: `1px solid ${trainer.color}33`,
+        background: `linear-gradient(135deg, ${trainer.color}12, rgba(14,20,14,0.85))`,
+        borderRadius: 14,
+        textAlign: 'left',
+        cursor: 'pointer',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 14,
+      }}
+    >
+      <span style={{ fontSize: 28 }}>{trainer.emoji}</span>
+      <div style={{ flex: 1 }}>
+        <div style={{ fontSize: 14, fontWeight: 800, color: '#fff' }}>Ask {shortName}</div>
+        <div style={{ fontSize: 12, color: '#A7C4B8', marginTop: 2, lineHeight: 1.4 }}>
+          Follow up on your program, nutrition, or training questions
+        </div>
+      </div>
+      <span style={{ color: '#6EE7B7', fontSize: 18 }}>→</span>
+    </motion.button>
+  )
+}
+
+function SetupProgramCta({ onClick }) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: 0.4 }}
+      className="glass"
+      style={{
+        padding: 20,
+        marginBottom: 14,
+        border: '1px solid rgba(110,231,183,0.12)',
+        borderTop: '3px solid #6EE7B7',
+        textAlign: 'center',
+      }}
+    >
+      <div style={{ fontSize: 15, fontWeight: 800, color: '#fff', marginBottom: 6 }}>Set up your program</div>
+      <p style={{ fontSize: 12, color: '#A7C4B8', lineHeight: 1.5, marginBottom: 14 }}>
+        Pick a trainer and generate workout + meal plans tailored to you.
+      </p>
+      <button
+        type="button"
+        onClick={onClick}
+        style={{
+          width: '100%',
+          padding: 14,
+          borderRadius: 12,
+          border: 'none',
+          background: 'linear-gradient(135deg, #10B981, #6EE7B7)',
+          color: '#070B07',
+          fontSize: 14,
+          fontWeight: 700,
+          cursor: 'pointer',
+        }}
+      >
+        Open Program →
+      </button>
+    </motion.div>
   )
 }
 
@@ -287,48 +324,38 @@ export default function Dashboard() {
     refreshProfile,
   } = useAuth()
   const profileResolutionTimedOut = useProfileResolutionTimeout(user, authProfile, 3000)
-  const [weightModalOpen, setWeightModalOpen] = useState(false)
   const [trainerModalOpen, setTrainerModalOpen] = useState(false)
   const [foodLogModalOpen, setFoodLogModalOpen] = useState(false)
   const [workoutLogModalOpen, setWorkoutLogModalOpen] = useState(false)
   const [toast, setToast] = useState(null)
   const [todayMeals, setTodayMeals] = useState([])
   const [recentWorkouts, setRecentWorkouts] = useState([])
-  const [analysisLoading, setAnalysisLoading] = useState(false)
-  const [analysisResult, setAnalysisResult] = useState(null)
-  const [chartHeight, setChartHeight] = useState(160)
   const [progressPhotos, setProgressPhotos] = useState([])
   const [photoModalOpen, setPhotoModalOpen] = useState(false)
   const [photoDetail, setPhotoDetail] = useState(null)
   const [compareOpen, setCompareOpen] = useState(false)
-  const [programAdjustText, setProgramAdjustText] = useState('')
-  const [adjustScope, setAdjustScope] = useState('both')
-  const [adjustLoading, setAdjustLoading] = useState(false)
-  const [adjustError, setAdjustError] = useState(null)
-  const [showMoreTools, setShowMoreTools] = useState(false)
 
   const profile = authProfile
   const trainer = profile ? getTrainer(profile.trainer) : getTrainer('bro')
 
-  const dashPwKey = profile?.id && supabase ? ['dash-pw', profile.id] : null
-  const { data: dashPW, mutate: mutateDashPw, isLoading: dashPwLoading, error: dashPwError } = useSWR(
-    dashPwKey,
-    fetchDashboardPlansWeight,
-    {
-      keepPreviousData: true,
-      revalidateOnFocus: false,
-      dedupingInterval: 5000,
-    }
+  const dashPlansKey = profile?.id && supabase ? ['dash-plans', profile.id] : null
+  const { data: plansData, mutate: mutatePlans, isLoading: plansLoading, error: plansError } = useSWR(
+    dashPlansKey,
+    fetchDashboardPlans,
+    { keepPreviousData: true, revalidateOnFocus: false, dedupingInterval: 5000 }
   )
+
   const plans = useMemo(() => {
-    const rows = dashPW?.plansData
+    const rows = plansData
     if (!rows) return { workout: null, meal: null }
     return {
       workout: rows.find((p) => p.type === 'workout'),
       meal: rows.find((p) => p.type === 'meal'),
     }
-  }, [dashPW?.plansData])
-  const weightLogs = useMemo(() => buildWeightLogsFromProfile(profile, dashPW?.logs), [profile, dashPW?.logs])
+  }, [plansData])
+
+  const loading = Boolean(dashPlansKey && plansLoading && plansData === undefined && !plansError)
+
   const latestProgressSessionId = useMemo(() => {
     let bestDate = ''
     let id = null
@@ -341,7 +368,6 @@ export default function Dashboard() {
     }
     return id
   }, [progressPhotos])
-  const loading = Boolean(dashPwKey && dashPwLoading && dashPW === undefined && !dashPwError)
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -360,8 +386,6 @@ export default function Dashboard() {
       router.push('/onboarding')
     }
   }, [user, authProfile, profileLoading, authLoading, profileMissingConfirmed, router])
-
-  const missingProfileId = Boolean(profile) && !profile?.id
 
   async function loadProgressPhotos() {
     if (!profile?.id) return
@@ -404,10 +428,10 @@ export default function Dashboard() {
       if (!res.ok || !data.success) {
         throw new Error(data.error || data.details || 'Workout refresh failed')
       }
-      await loadPlansAndWeightLogs()
+      await mutatePlans()
       setToast(null)
     } catch {
-      setToast('Photo saved; workout refresh failed—try again from Plans')
+      setToast('Photo saved; workout refresh failed — try again from Program')
       setTimeout(() => setToast(null), 4500)
     }
   }
@@ -493,77 +517,6 @@ export default function Dashboard() {
     }
   }, [profile?.id])
 
-  useEffect(() => {
-    const mq = window.matchMedia('(min-width: 1024px)')
-    const apply = () => setChartHeight(mq.matches ? 250 : 160)
-    apply()
-    mq.addEventListener('change', apply)
-    return () => mq.removeEventListener('change', apply)
-  }, [])
-
-  function buildWeightLogsFromProfile(profileRow, logs) {
-    const built = []
-    const startDate = profileRow?.created_at
-      ? new Date(profileRow.created_at).toISOString().split('T')[0]
-      : new Date().toISOString().split('T')[0]
-    if (!logs || logs.length === 0) {
-      built.push({ date: new Date().toISOString().split('T')[0], weight_kg: profileRow.weight_kg })
-    } else {
-      const hasStart = logs.some((l) => ((l.logged_at || l.created_at || '') + '').split('T')[0] === startDate)
-      if (!hasStart && profileRow.created_at) {
-        built.push({ date: startDate, weight_kg: profileRow.weight_kg })
-      }
-      logs.forEach((l) => {
-        const raw = l.logged_at || l.created_at || new Date().toISOString()
-        const d = (typeof raw === 'string' ? raw : new Date(raw).toISOString()).split('T')[0]
-        built.push({ date: d, weight_kg: l.weight_kg })
-      })
-      built.sort((a, b) => a.date.localeCompare(b.date))
-    }
-    return built
-  }
-
-  async function loadPlansAndWeightLogs() {
-    if (!profile?.id) return
-    await mutateDashPw()
-  }
-
-  async function handleLogWeight(weightKg) {
-    if (!profile) return
-    try {
-      if (!supabase) return
-      await supabase.from('weight_logs').insert({
-        profile_id: profile.id,
-        weight_kg: weightKg,
-      })
-      await supabase.from('profiles').update({ weight_kg: weightKg }).eq('id', profile.id)
-      refreshProfile().catch(() => {})
-      mutateDashPw()
-    } catch (e) {
-      console.error(e)
-    }
-  }
-
-  async function handleAnalyze() {
-    if (!profile?.id) return
-    setAnalysisLoading(true)
-    setAnalysisResult(null)
-    try {
-      const res = await fetch('/api/analyze', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ profileId: profile.id }),
-      })
-      const data = await res.json()
-      if (data.error) throw new Error(data.error)
-      setAnalysisResult(data.summary || data.recommendation)
-    } catch (err) {
-      setAnalysisResult(`Error: ${err?.message || 'Analysis failed'}`)
-    } finally {
-      setAnalysisLoading(false)
-    }
-  }
-
   async function handleWorkoutLogged() {
     const res = await fetch(`/api/workout-log?profileId=${profile.id}&limit=10`)
     const data = await res.json()
@@ -587,51 +540,6 @@ export default function Dashboard() {
     await refreshProfile()
     setToast(`Switched to ${t.name}`)
     setTimeout(() => setToast(null), 2000)
-  }
-
-  async function handleRegenerateWithAdjustments() {
-    if (!profile?.id) return
-    const text = programAdjustText.trim()
-    if (!text) {
-      setAdjustError('Describe what you want to change first.')
-      return
-    }
-    setAdjustLoading(true)
-    setAdjustError(null)
-    try {
-      const workoutPreferences = { ...(profile.preferences?.workout || {}) }
-      const mealPreferences = { ...(profile.preferences?.meal || {}) }
-      const tid = profile.trainer || 'bro'
-      const res = await fetch('/api/generate-plan', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(await jsonHeadersWithAuth()),
-        },
-        body: JSON.stringify({
-          profileId: profile.id,
-          profile: { ...profile, trainer: tid },
-          trainerId: tid,
-          onboardingContext: profile?.onboarding_context,
-          type: adjustScope,
-          workoutPreferences,
-          mealPreferences,
-          programAdjustments: text,
-        }),
-      })
-      const data = await res.json().catch(() => ({}))
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || data.details || `Could not update your program (${res.status}).`)
-      }
-      await Promise.all([loadPlansAndWeightLogs(), refreshProfile()])
-      setProgramAdjustText('')
-      setToast('Program updated from your notes')
-      setTimeout(() => setToast(null), 2500)
-    } catch (err) {
-      setAdjustError(err?.message || 'Something went wrong. Try again.')
-    } finally {
-      setAdjustLoading(false)
-    }
   }
 
   const showProfileRecovery =
@@ -660,645 +568,66 @@ export default function Dashboard() {
     return <BrandedAuthLoading minHeight="70vh" />
   }
 
-  const hasAnyPlan = !!(plans.workout || plans.meal)
   const greeting = getGreeting(profile.name?.split(' ')[0] || 'there')
-  const cardDelaysPre = [0, 100, 200, 300, 400, 500, 600, 700]
-  const skeletonPulse = {
-    animation: 'pulse 1.2s ease-in-out infinite',
-    borderRadius: 12,
-    background: 'rgba(110,231,183,0.12)',
-  }
-
-  if (loading && profile?.id) {
-    const skTrainer = profile ? getTrainer(profile.trainer) : getTrainer('bro')
-    return (
-      <div className="dashboard-app-container" style={{ paddingTop: 18, paddingBottom: 24 }}>
-        {toast && (
-          <motion.div
-            initial={{ opacity: 0, y: -20 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0 }}
-            style={{
-              position: 'fixed',
-              top: 20,
-              left: '50%',
-              transform: 'translateX(-50%)',
-              padding: '12px 20px',
-              background: 'rgba(14,20,14,0.95)',
-              border: '1px solid rgba(110,231,183,0.3)',
-              borderRadius: 12,
-              color: '#6EE7B7',
-              fontSize: 14,
-              fontWeight: 600,
-              zIndex: 50,
-              boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
-            }}
-          >
-            {toast}
-          </motion.div>
-        )}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: cardDelaysPre[0] }}
-          style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}
-        >
-          <div>
-            <h1 style={{ fontSize: 22, fontWeight: 800, letterSpacing: -0.8 }}>
-              <span style={{ color: '#6EE7B7' }}>Fit</span>
-              <span style={{ color: '#fff' }}>Coach</span>
-              <span className="gradient-accent" style={{ fontSize: 12, fontWeight: 600, marginLeft: 6 }}>AI</span>
-            </h1>
-            <p style={{ fontSize: 14, color: '#D1FAE5', fontWeight: 500, marginTop: 4 }}>
-              {greeting.text} {greeting.emoji}
-            </p>
-            <p style={{ fontSize: 12, fontWeight: 600, marginTop: 6, color: '#6B8F7A' }}>
-              Loading your plan and stats…
-            </p>
-          </div>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', flexShrink: 0 }}>
-            <button
-              type="button"
-              aria-label="Add progress photo"
-              onClick={() => setPhotoModalOpen(true)}
-              style={{
-                width: 48,
-                height: 48,
-                borderRadius: 16,
-                background: 'rgba(14,20,14,0.55)',
-                backdropFilter: 'blur(24px)',
-                border: '1px solid rgba(110,231,183,0.1)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontSize: 22,
-                cursor: 'pointer',
-              }}
-            >
-              📷
-            </button>
-            <button
-              type="button"
-              onClick={() => setTrainerModalOpen(true)}
-              style={{
-                width: 48,
-                height: 48,
-                borderRadius: 16,
-                background: 'rgba(14,20,14,0.55)',
-                backdropFilter: 'blur(24px)',
-                border: '1px solid rgba(110,231,183,0.1)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontSize: 24,
-                cursor: 'pointer',
-              }}
-            >
-              {skTrainer.emoji}
-            </button>
-          </div>
-        </motion.div>
-
-        <DashboardAtAGlance
-          profileRow={profile}
-          coachFirstName={(skTrainer.name || '').split(/\s+/)[0] || ''}
-        />
-        <DashboardShortcutStrip
-          router={router}
-          chatLabel={(skTrainer.name || 'Coach').split(/\s+/).pop()}
-          onOpenFood={() => setFoodLogModalOpen(true)}
-          onOpenWorkout={() => setWorkoutLogModalOpen(true)}
-          onOpenPhoto={() => setPhotoModalOpen(true)}
-        />
-
-        <div className="card-grid" style={{ marginBottom: 14 }}>
-          {[1, 2, 3].map((i) => (
-            <div key={i} className="glass" style={{ padding: 18, borderTop: '3px solid rgba(110,231,183,0.15)' }}>
-              <div style={{ ...skeletonPulse, height: 10, width: '40%', marginBottom: 12 }} />
-              <div style={{ ...skeletonPulse, height: 22, width: '55%' }} />
-            </div>
-          ))}
-        </div>
-
-        <div className="glass" style={{ padding: 14, marginBottom: 14 }}>
-          <div style={{ fontSize: 11, color: '#2D5B3F', fontWeight: 700, marginBottom: 6 }}>LOADING</div>
-          <div style={{ fontSize: 13, color: '#8BAFA0', lineHeight: 1.45 }}>
-            Pulling your latest plan and weight history… Progress photos and shortcuts above stay available.
-          </div>
-        </div>
-
-        <div className="glass" style={{ padding: 0, marginBottom: 14, overflow: 'hidden' }}>
-          <div
-            style={{
-              padding: '16px 18px',
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'flex-start',
-              gap: 12,
-              borderBottom: '1px solid rgba(110,231,183,0.05)',
-            }}
-          >
-            <div>
-              <div style={{ fontSize: 16, fontWeight: 700, color: '#fff' }}>Progress photos</div>
-              <div style={{ fontSize: 11, color: '#4A6B58', marginTop: 4, lineHeight: 1.4 }}>
-                Add new check-in photos whenever you want — same angles help comparisons.
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={() => setPhotoModalOpen(true)}
-              style={{
-                padding: '6px 14px',
-                borderRadius: 100,
-                background: 'rgba(110,231,183,0.1)',
-                border: '1px solid rgba(110,231,183,0.15)',
-                color: '#6EE7B7',
-                fontSize: 11,
-                fontWeight: 700,
-                flexShrink: 0,
-              }}
-            >
-              + Add photo
-            </button>
-          </div>
-          <ProgressTimeline
-            photos={progressPhotos}
-            onAdd={() => setPhotoModalOpen(true)}
-            onSelectPhoto={(p) => setPhotoDetail(p)}
-          />
-          {progressPhotos.length >= 2 && (
-            <div style={{ padding: '0 18px 16px' }}>
-              <div style={{ fontSize: 12, color: '#2D5B3F', fontWeight: 600, marginBottom: 8 }}>Body fat trend (estimated)</div>
-              <BodyFatLineChart photos={progressPhotos} height={140} />
-            </div>
-          )}
-        </div>
-
-        <div className="glass" style={{ padding: 20, marginBottom: 14 }}>
-          <div style={{ ...skeletonPulse, height: 14, width: '70%', marginBottom: 14 }} />
-          <div style={{ ...skeletonPulse, height: 10, width: '100%', marginBottom: 10 }} />
-          <div style={{ ...skeletonPulse, height: 10, width: '90%', marginBottom: 10 }} />
-          <div style={{ ...skeletonPulse, height: 10, width: '85%' }} />
-        </div>
-
-        <PhotoUploadModal
-          isOpen={photoModalOpen}
-          onClose={() => setPhotoModalOpen(false)}
-          profile={profile}
-          latestSessionId={latestProgressSessionId}
-          onSaved={handleProgressPhotoSaved}
-        />
-        <CompareModal
-          isOpen={compareOpen}
-          onClose={() => setCompareOpen(false)}
-          photos={progressPhotos}
-          profile={profile}
-        />
-        <ProgressPhotoDetailModal
-          isOpen={Boolean(photoDetail)}
-          photo={photoDetail}
-          onClose={() => setPhotoDetail(null)}
-          onCompare={progressPhotos.length >= 2 ? () => setCompareOpen(true) : undefined}
-          onDelete={handleDeleteProgressPhoto}
-        />
-        <TrainerModal
-          open={trainerModalOpen}
-          onClose={() => setTrainerModalOpen(false)}
-          profile={profile}
-          currentTrainer={skTrainer}
-          onSelect={handleSelectTrainer}
-        />
-        <FoodLogModal
-          open={foodLogModalOpen}
-          onClose={() => setFoodLogModalOpen(false)}
-          profileId={profile?.id}
-          onLog={handleMealLogged}
-        />
-        <LogWorkoutModal
-          open={workoutLogModalOpen}
-          onClose={() => setWorkoutLogModalOpen(false)}
-          profileId={profile?.id}
-          onLog={handleWorkoutLogged}
-        />
-      </div>
-    )
-  }
-
-  if (!hasAnyPlan) {
-    const headerPhotoBtnStyle = {
-      width: 48,
-      height: 48,
-      borderRadius: 16,
-      background: 'rgba(14,20,14,0.55)',
-      backdropFilter: 'blur(24px)',
-      border: '1px solid rgba(110,231,183,0.1)',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      fontSize: 22,
-      flexShrink: 0,
-      cursor: 'pointer',
-    }
-    return (
-      <div className="dashboard-app-container" style={{ paddingTop: 24, paddingBottom: 32 }}>
-        {toast && (
-          <motion.div
-            initial={{ opacity: 0, y: -20 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0 }}
-            style={{
-              position: 'fixed',
-              top: 20,
-              left: '50%',
-              transform: 'translateX(-50%)',
-              padding: '12px 20px',
-              background: 'rgba(14,20,14,0.95)',
-              border: '1px solid rgba(110,231,183,0.3)',
-              borderRadius: 12,
-              color: '#6EE7B7',
-              fontSize: 14,
-              fontWeight: 600,
-              zIndex: 50,
-              boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
-            }}
-          >
-            {toast}
-          </motion.div>
-        )}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, marginBottom: 24 }}>
-          <div>
-            <h1 style={{ fontSize: 26, fontWeight: 800, letterSpacing: -0.8 }}>
-              <span style={{ color: '#6EE7B7' }}>Fit</span>
-              <span style={{ color: '#fff' }}>Coach</span>
-              <span className="gradient-accent" style={{ fontSize: 13, fontWeight: 600, marginLeft: 6 }}>AI</span>
-            </h1>
-            <p style={{ fontSize: 13, color: '#A7C4B8', fontWeight: 500, marginTop: 6 }}>
-              {greeting.text} {greeting.emoji}
-            </p>
-          </div>
-          <button
-            type="button"
-            aria-label="Add progress photo"
-            onClick={() => setPhotoModalOpen(true)}
-            style={headerPhotoBtnStyle}
-          >
-            📷
-          </button>
-        </div>
-
-        <DashboardAtAGlance
-          profileRow={profile}
-          coachFirstName={(trainer.name || '').split(/\s+/)[0] || ''}
-        />
-        <DashboardShortcutStrip
-          router={router}
-          chatLabel={(trainer.name || 'Coach').split(/\s+/).pop()}
-          onOpenFood={() => setFoodLogModalOpen(true)}
-          onOpenWorkout={() => setWorkoutLogModalOpen(true)}
-          onOpenPhoto={() => setPhotoModalOpen(true)}
-        />
-
-        <div className="card-grid" style={{ marginBottom: 20 }}>
-          <div className="glass" style={{ padding: 16, borderTop: '3px solid #F97316' }}>
-            <div style={{ fontSize: 10, color: '#2D5B3F', fontWeight: 600 }}>THIS WEEK · SESSIONS</div>
-            <div style={{ fontSize: 22, fontWeight: 800, color: '#fff', marginTop: 4 }}>
-              {countWorkoutsThisWeek(recentWorkouts)}
-            </div>
-            <div style={{ fontSize: 11, color: '#4A6B58', marginTop: 6, lineHeight: 1.4 }}>
-              Log workouts to see this climb. Full program unlocks smarter tracking.
-            </div>
-          </div>
-          <div className="glass" style={{ padding: 16, borderTop: '3px solid #6EE7B7' }}>
-            <div style={{ fontSize: 10, color: '#2D5B3F', fontWeight: 600 }}>PHOTOS</div>
-            <div style={{ fontSize: 22, fontWeight: 800, color: '#fff', marginTop: 4 }}>{progressPhotos.length}</div>
-            <div style={{ fontSize: 11, color: '#4A6B58', marginTop: 6, lineHeight: 1.4 }}>
-              Progress pics help your coach see what the scale won&apos;t show.
-            </div>
-          </div>
-          <button
-            type="button"
-            className="glass"
-            onClick={() => setWeightModalOpen(true)}
-            style={{
-              padding: 16,
-              borderTop: '3px solid #93C5FD',
-              textAlign: 'left',
-              cursor: 'pointer',
-              borderLeft: 'none',
-              borderRight: 'none',
-              borderBottom: 'none',
-              width: '100%',
-              fontFamily: 'inherit',
-            }}
-          >
-            <div style={{ fontSize: 10, color: '#2D5B3F', fontWeight: 600 }}>WEIGHT</div>
-            <div style={{ fontSize: 22, fontWeight: 800, color: '#fff', marginTop: 4 }}>
-              {profile?.weight_kg != null ? `${profile.weight_kg} kg` : '—'}
-            </div>
-            <div style={{ fontSize: 11, color: '#4A6B58', marginTop: 6, lineHeight: 1.4 }}>
-              Tap to log or update your weight anytime.
-            </div>
-          </button>
-        </div>
-
-        <div
-          className="glass"
-          style={{ padding: 0, marginBottom: 24, overflow: 'hidden', border: '1px solid rgba(110,231,183,0.12)' }}
-        >
-          <div
-            style={{
-              padding: '16px 18px',
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'flex-start',
-              gap: 12,
-              borderBottom: '1px solid rgba(110,231,183,0.05)',
-            }}
-          >
-            <div>
-              <div style={{ fontSize: 16, fontWeight: 700, color: '#fff' }}>Progress photos</div>
-              <div style={{ fontSize: 11, color: '#4A6B58', marginTop: 4, lineHeight: 1.4 }}>
-                Add new check-in photos whenever you want — same angles help comparisons.
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={() => setPhotoModalOpen(true)}
-              style={{
-                padding: '6px 14px',
-                borderRadius: 100,
-                background: 'rgba(110,231,183,0.1)',
-                border: '1px solid rgba(110,231,183,0.15)',
-                color: '#6EE7B7',
-                fontSize: 11,
-                fontWeight: 700,
-                flexShrink: 0,
-              }}
-            >
-              + Add photo
-            </button>
-          </div>
-          <ProgressTimeline
-            photos={progressPhotos}
-            onAdd={() => setPhotoModalOpen(true)}
-            onSelectPhoto={(p) => setPhotoDetail(p)}
-          />
-          {progressPhotos.length >= 2 && (
-            <div style={{ padding: '0 18px 16px' }}>
-              <div style={{ fontSize: 12, color: '#2D5B3F', fontWeight: 600, marginBottom: 8 }}>Body fat trend (estimated)</div>
-              <BodyFatLineChart photos={progressPhotos} height={140} />
-            </div>
-          )}
-        </div>
-        <PhotoUploadModal
-          isOpen={photoModalOpen}
-          onClose={() => setPhotoModalOpen(false)}
-          profile={profile}
-          latestSessionId={latestProgressSessionId}
-          onSaved={handleProgressPhotoSaved}
-        />
-        <CompareModal
-          isOpen={compareOpen}
-          onClose={() => setCompareOpen(false)}
-          photos={progressPhotos}
-          profile={profile}
-        />
-        <ProgressPhotoDetailModal
-          isOpen={Boolean(photoDetail)}
-          photo={photoDetail}
-          onClose={() => setPhotoDetail(null)}
-          onCompare={progressPhotos.length >= 2 ? () => setCompareOpen(true) : undefined}
-          onDelete={handleDeleteProgressPhoto}
-        />
-
-        <div
-          className="glass"
-          style={{
-            padding: 0,
-            marginBottom: 24,
-            overflow: 'hidden',
-            background: 'rgba(14, 20, 14, 0.92)',
-            WebkitBackfaceVisibility: 'visible',
-            border: '1px solid rgba(110,231,183,0.12)',
-          }}
-        >
-          <div style={{ height: 3, background: 'linear-gradient(90deg, #10B981, #6EE7B7, #F97316, #EC4899)' }} />
-          <div style={{ padding: '32px 24px', textAlign: 'center' }}>
-            <div style={{ fontSize: 48, marginBottom: 12 }}>🎯</div>
-            <h2 style={{ fontSize: 22, fontWeight: 800, color: '#fff', marginBottom: 8 }}>
-              Pick up your program
-            </h2>
-            <p
-              style={{
-                fontSize: 14,
-                color: '#B8D4C4',
-                lineHeight: 1.6,
-                marginBottom: 24,
-                maxWidth: 400,
-                margin: '0 auto 24px',
-              }}
-            >
-              You&apos;re signed in — generate or refresh a workout plan anytime. Your coach will use the preferences you already saved.
-            </p>
-            <button
-              type="button"
-              onClick={() => router.push('/plans')}
-              style={{
-                width: '100%',
-                maxWidth: 320,
-                margin: '0 auto',
-                display: 'block',
-                padding: 16,
-                borderRadius: 14,
-                border: 'none',
-                background: 'linear-gradient(135deg, #10B981, #6EE7B7)',
-                color: '#070B07',
-                fontSize: 16,
-                fontWeight: 700,
-                boxShadow: '0 4px 20px rgba(16,185,129,0.25)',
-                cursor: 'pointer',
-              }}
-            >
-              Open Plans &amp; generate →
-            </button>
-            <button
-              type="button"
-              onClick={() => router.push('/settings')}
-              style={{
-                marginTop: 12,
-                background: 'transparent',
-                border: 'none',
-                color: '#6B8F7A',
-                fontSize: 13,
-                fontWeight: 600,
-                cursor: 'pointer',
-                textDecoration: 'underline',
-              }}
-            >
-              Profile &amp; settings
-            </button>
-          </div>
-        </div>
-
-        <div className="card-grid">
-          {[
-            { emoji: '🏋️', title: 'Personalized workouts', desc: 'Programs matched to your equipment, schedule, and coach personality.' },
-            { emoji: '🥗', title: 'Nutrition that fits', desc: 'Meal plans and logging so calories and protein aren’t a guessing game.' },
-            { emoji: '💬', title: 'Coach in your pocket', desc: 'Ask about form, soreness, or motivation — your AI trainer remembers your plan.' },
-            { emoji: '📷', title: 'Visual progress', desc: 'Photo check-ins and comparisons so you see changes the scale hides.' },
-            { emoji: '📊', title: 'Habits that stick', desc: 'Weight, workouts, and meals in one place — build streaks without spreadsheets.' },
-            { emoji: '⚡', title: 'Fast course correction', desc: 'Tell the coach what changed (injury, travel, diet) and regenerate your plan.' },
-          ].map((card, i) => (
-            <div key={i} className="glass" style={{ padding: '20px 18px', background: 'rgba(14, 20, 14, 0.92)', WebkitBackfaceVisibility: 'visible' }}>
-              <div style={{ fontSize: 28, marginBottom: 8 }}>{card.emoji}</div>
-              <div style={{ fontSize: 15, fontWeight: 700, color: '#D1FAE5', marginBottom: 4 }}>{card.title}</div>
-              <div style={{ fontSize: 12, color: '#8BAFA0', lineHeight: 1.5 }}>{card.desc}</div>
-            </div>
-          ))}
-        </div>
-
-        <FoodLogModal
-          open={foodLogModalOpen}
-          onClose={() => setFoodLogModalOpen(false)}
-          profileId={profile?.id}
-          onLog={handleMealLogged}
-        />
-        <LogWorkoutModal
-          open={workoutLogModalOpen}
-          onClose={() => setWorkoutLogModalOpen(false)}
-          profileId={profile?.id}
-          onLog={handleWorkoutLogged}
-        />
-        <WeightModal
-          open={weightModalOpen}
-          onClose={() => setWeightModalOpen(false)}
-          profile={profile}
-          onSave={handleLogWeight}
-        />
-      </div>
-    )
-  }
-
   const workoutContent = plans.workout?.content || null
   const mealContent = plans.meal?.content || null
   const hasWorkoutPlan = hasUsableWorkoutPlan(plans.workout)
   const hasMealPlan = hasUsableMealPlan(plans.meal)
-  const startWeight = weightLogs[0]?.weight_kg ?? profile.weight_kg
-  const currentWeight = profile.weight_kg
-  const swN = typeof startWeight === 'number' && !Number.isNaN(startWeight) ? startWeight : null
-  const cwN = typeof currentWeight === 'number' && !Number.isNaN(currentWeight) ? currentWeight : null
-  const weightDiff = (cwN ?? 0) - (swN ?? 0)
-  const progressDir = profile.goal === 'lose_fat' ? (weightDiff < 0 ? 'good' : 'bad') : profile.goal === 'build_muscle' ? (weightDiff > 0 ? 'good' : 'bad') : 'neutral'
+  const hasAnyPlan = hasWorkoutPlan || hasMealPlan
+  const cardDelays = [0, 100, 200, 300]
 
-  const workoutStreak = computeWorkoutStreak(recentWorkouts)
-  const workoutsThisWeek = countWorkoutsThisWeek(recentWorkouts)
-  const weekTargetSessions = Math.min(7, Math.max(1, Number(plans.workout?.content?.daysPerWeek) || 4))
+  const headerProps = {
+    greeting,
+    trainer,
+    hasWorkoutPlan,
+    onPhoto: () => setPhotoModalOpen(true),
+    onTrainer: () => setTrainerModalOpen(true),
+  }
 
-  const cardDelays = [0, 100, 200, 300, 400, 500, 600, 700]
+  if (loading) {
+    return (
+      <div className="dashboard-app-container" style={{ paddingTop: 18, paddingBottom: 24 }}>
+        <Toast message={toast} />
+        <DashboardHeader {...headerProps} />
+        <div className="glass" style={{ padding: 20, marginBottom: 14 }}>
+          <div style={{ fontSize: 13, color: '#8BAFA0' }}>Loading your program…</div>
+        </div>
+        <ProgressPhotosSection
+          photos={progressPhotos}
+          onAdd={() => setPhotoModalOpen(true)}
+          onSelectPhoto={(p) => setPhotoDetail(p)}
+        />
+        <DashboardModals
+          profile={profile}
+          trainer={trainer}
+          progressPhotos={progressPhotos}
+          latestProgressSessionId={latestProgressSessionId}
+          photoModalOpen={photoModalOpen}
+          setPhotoModalOpen={setPhotoModalOpen}
+          compareOpen={compareOpen}
+          setCompareOpen={setCompareOpen}
+          photoDetail={photoDetail}
+          setPhotoDetail={setPhotoDetail}
+          trainerModalOpen={trainerModalOpen}
+          setTrainerModalOpen={setTrainerModalOpen}
+          foodLogModalOpen={foodLogModalOpen}
+          setFoodLogModalOpen={setFoodLogModalOpen}
+          workoutLogModalOpen={workoutLogModalOpen}
+          setWorkoutLogModalOpen={setWorkoutLogModalOpen}
+          onProgressPhotoSaved={handleProgressPhotoSaved}
+          onDeleteProgressPhoto={handleDeleteProgressPhoto}
+          onSelectTrainer={handleSelectTrainer}
+          onMealLogged={handleMealLogged}
+          onWorkoutLogged={handleWorkoutLogged}
+        />
+      </div>
+    )
+  }
 
   return (
     <div className="dashboard-app-container" style={{ paddingTop: 18, paddingBottom: 24 }}>
-      {/* Toast */}
-      {toast && (
-        <motion.div
-          initial={{ opacity: 0, y: -20 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0 }}
-          style={{
-            position: 'fixed',
-            top: 20,
-            left: '50%',
-            transform: 'translateX(-50%)',
-            padding: '12px 20px',
-            background: 'rgba(14,20,14,0.95)',
-            border: '1px solid rgba(110,231,183,0.3)',
-            borderRadius: 12,
-            color: '#6EE7B7',
-            fontSize: 14,
-            fontWeight: 600,
-            zIndex: 50,
-            boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
-          }}
-        >
-          {toast}
-        </motion.div>
-      )}
-
-      {/* A. Header */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: cardDelays[0] }}
-        style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}
-      >
-        <div>
-          <h1 style={{ fontSize: 22, fontWeight: 800, letterSpacing: -0.8 }}>
-            <span style={{ color: '#6EE7B7' }}>Fit</span>
-            <span style={{ color: '#fff' }}>Coach</span>
-            <span className="gradient-accent" style={{ fontSize: 12, fontWeight: 600, marginLeft: 6 }}>AI</span>
-          </h1>
-          <p style={{ fontSize: 14, color: '#D1FAE5', fontWeight: 500, marginTop: 4 }}>
-            {greeting.text} {greeting.emoji}
-          </p>
-          {hasWorkoutPlan ? (
-            <p
-              style={{
-                fontSize: 13,
-                fontWeight: 600,
-                marginTop: 6,
-                color: trainer.color || '#6EE7B7',
-              }}
-            >
-              Coached by {trainer.name} {trainer.emoji}
-            </p>
-          ) : (
-            <p style={{ fontSize: 12, fontWeight: 600, marginTop: 6, color: '#6B8F7A' }}>
-              Default mode — log habits below or create your program for a full plan
-            </p>
-          )}
-        </div>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', flexShrink: 0 }}>
-          <button
-            type="button"
-            aria-label="Add progress photo"
-            onClick={() => setPhotoModalOpen(true)}
-            style={{
-              width: 48,
-              height: 48,
-              borderRadius: 16,
-              background: 'rgba(14,20,14,0.55)',
-              backdropFilter: 'blur(24px)',
-              border: '1px solid rgba(110,231,183,0.1)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: 22,
-              cursor: 'pointer',
-            }}
-          >
-            📷
-          </button>
-          <button
-            type="button"
-            onClick={() => setTrainerModalOpen(true)}
-            style={{
-              width: 48,
-              height: 48,
-              borderRadius: 16,
-              background: 'rgba(14,20,14,0.55)',
-              backdropFilter: 'blur(24px)',
-              border: '1px solid rgba(110,231,183,0.1)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: 24,
-              cursor: 'pointer',
-            }}
-          >
-            {trainer.emoji}
-          </button>
-        </div>
-      </motion.div>
+      <Toast message={toast} />
+      <DashboardHeader {...headerProps} />
 
       <DailyMacrosCard
         profile={profile}
@@ -1322,553 +651,75 @@ export default function Dashboard() {
         onOpenLogWorkout={() => setWorkoutLogModalOpen(true)}
         cardDelay={cardDelays[3]}
       />
-      <QuickCoachPanel
-        profile={profile}
-        activeWorkoutContent={workoutContent}
-        activeMealContent={mealContent}
-        cardDelay={cardDelays[4]}
+
+      <ProgressPhotosSection
+        photos={progressPhotos}
+        onAdd={() => setPhotoModalOpen(true)}
+        onSelectPhoto={(p) => setPhotoDetail(p)}
       />
 
-      <button
-        type="button"
-        onClick={() => setShowMoreTools((v) => !v)}
-        className="glass"
-        style={{
-          width: '100%',
-          padding: 14,
-          marginBottom: 14,
-          border: '1px solid rgba(110,231,183,0.15)',
-          background: 'rgba(14,20,14,0.65)',
-          color: '#6EE7B7',
-          fontSize: 13,
-          fontWeight: 700,
-          borderRadius: 14,
-        }}
-      >
-        {showMoreTools ? 'Hide extra tools' : 'More tools — goals, progress, shortcuts'}
-      </button>
+      <AskCoachCard trainer={trainer} onClick={() => router.push('/plans?coach=1')} />
 
-      {showMoreTools ? (
-        <>
-          <DashboardAtAGlance
-            profileRow={profile}
-            coachFirstName={(trainer.name || '').split(/\s+/)[0] || ''}
-          />
-          <DashboardShortcutStrip
-            router={router}
-            chatLabel={(trainer.name || 'Coach').split(/\s+/).pop()}
-            onOpenFood={() => setFoodLogModalOpen(true)}
-            onOpenWorkout={() => setWorkoutLogModalOpen(true)}
-            onOpenPhoto={() => setPhotoModalOpen(true)}
-          />
+      {!hasAnyPlan && <SetupProgramCta onClick={() => router.push('/plans')} />}
 
-          <div
-            className="glass"
-            style={{
-              padding: '14px 16px',
-              marginBottom: 14,
-              display: 'flex',
-              justifyContent: 'space-between',
-              flexWrap: 'wrap',
-              gap: 12,
-              border: '1px solid rgba(110,231,183,0.08)',
-            }}
-          >
-            <div>
-              <div style={{ fontSize: 9, color: '#2D5B3F', fontWeight: 700, letterSpacing: 0.5 }}>TODAY · MEALS</div>
-              <div style={{ fontSize: 15, fontWeight: 800, color: '#fff', marginTop: 2 }}>
-                {todayMeals.length} logged
-              </div>
-            </div>
-            <div>
-              <div style={{ fontSize: 9, color: '#2D5B3F', fontWeight: 700, letterSpacing: 0.5 }}>PROGRESS PHOTOS</div>
-              <div style={{ fontSize: 15, fontWeight: 800, color: '#fff', marginTop: 2 }}>{progressPhotos.length}</div>
-            </div>
-            <div>
-              <div style={{ fontSize: 9, color: '#2D5B3F', fontWeight: 700, letterSpacing: 0.5 }}>WEIGHT</div>
-              <div style={{ fontSize: 15, fontWeight: 800, color: '#fff', marginTop: 2 }}>
-                {profile?.weight_kg != null ? `${profile.weight_kg} kg` : '—'}
-              </div>
-            </div>
-          </div>
+      <DashboardModals
+        profile={profile}
+        trainer={trainer}
+        progressPhotos={progressPhotos}
+        latestProgressSessionId={latestProgressSessionId}
+        photoModalOpen={photoModalOpen}
+        setPhotoModalOpen={setPhotoModalOpen}
+        compareOpen={compareOpen}
+        setCompareOpen={setCompareOpen}
+        photoDetail={photoDetail}
+        setPhotoDetail={setPhotoDetail}
+        trainerModalOpen={trainerModalOpen}
+        setTrainerModalOpen={setTrainerModalOpen}
+        foodLogModalOpen={foodLogModalOpen}
+        setFoodLogModalOpen={setFoodLogModalOpen}
+        workoutLogModalOpen={workoutLogModalOpen}
+        setWorkoutLogModalOpen={setWorkoutLogModalOpen}
+        onProgressPhotoSaved={handleProgressPhotoSaved}
+        onDeleteProgressPhoto={handleDeleteProgressPhoto}
+        onSelectTrainer={handleSelectTrainer}
+        onMealLogged={handleMealLogged}
+        onWorkoutLogged={handleWorkoutLogged}
+      />
+    </div>
+  )
+}
 
-          {!hasWorkoutPlan && (
-            <div
-              className="glass"
-              style={{
-                padding: 0,
-                marginBottom: 16,
-                overflow: 'hidden',
-                border: '1px solid rgba(110,231,183,0.12)',
-                background: 'rgba(14, 20, 14, 0.92)',
-                WebkitBackfaceVisibility: 'visible',
-              }}
-            >
-              <div style={{ height: 3, background: 'linear-gradient(90deg, #10B981, #6EE7B7)' }} />
-              <div style={{ padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 12 }}>
-                <div>
-                  <div style={{ fontSize: 15, fontWeight: 800, color: '#fff' }}>Build your workout program</div>
-                  <p style={{ fontSize: 12, color: '#B8D4C4', lineHeight: 1.45, marginTop: 4 }}>
-                    Everything below works now with defaults. Add a plan for personalized training & coach match.
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => router.push('/plans')}
-                  style={{
-                    width: '100%',
-                    padding: 14,
-                    borderRadius: 12,
-                    border: 'none',
-                    background: 'linear-gradient(135deg, #10B981, #6EE7B7)',
-                    color: '#070B07',
-                    fontSize: 14,
-                    fontWeight: 700,
-                  }}
-                >
-                  Create My Program →
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* B. Streak & Quick Stats */}
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: cardDelays[1] }}
-            className="card-grid"
-            style={{ marginBottom: 14 }}
-          >
-            <div className="glass" style={{ padding: 18, borderTop: '3px solid #F97316' }}>
-              <div style={{ fontSize: 10, color: '#2D5B3F', fontWeight: 600 }}>🔥 STREAK</div>
-              <div style={{ fontSize: 20, fontWeight: 800, color: '#fff' }}>
-                {workoutStreak > 0 ? `${workoutStreak} day${workoutStreak === 1 ? '' : 's'}` : '—'}
-              </div>
-              <div style={{ fontSize: 10, color: '#4A6B58', marginTop: 6, lineHeight: 1.35 }}>
-                {workoutStreak > 0 ? 'Consecutive days with a logged workout.' : 'Log a workout to start a streak.'}
-              </div>
-            </div>
-            <div className="glass" style={{ padding: 18, borderTop: '3px solid #6EE7B7' }}>
-              <div style={{ fontSize: 10, color: '#2D5B3F', fontWeight: 600 }}>⚡ THIS WEEK</div>
-              <div style={{ fontSize: 20, fontWeight: 800, color: '#fff' }}>
-                {workoutsThisWeek}/{weekTargetSessions}
-              </div>
-              <div style={{ fontSize: 10, color: '#4A6B58', marginTop: 6, lineHeight: 1.35 }}>
-                Sessions logged since Monday · target from your plan ({weekTargetSessions}/wk).
-              </div>
-            </div>
-            <div className="glass" style={{ padding: 18, borderTop: '3px solid #93C5FD' }}>
-              <div style={{ fontSize: 10, color: '#2D5B3F', fontWeight: 600 }}>📊 PROGRESS</div>
-              <div style={{
-                fontSize: 18,
-                fontWeight: 800,
-                color: progressDir === 'good' ? '#6EE7B7' : progressDir === 'bad' ? '#FB7185' : '#93C5FD',
-              }}>
-                {(cwN == null || swN == null) ? '—' : `${weightDiff >= 0 ? '+' : ''}${weightDiff.toFixed(1)} kg`}
-              </div>
-            </div>
-          </motion.div>
-
-          <GoalDashboardWidget
-            profileId={profile?.id}
-            profileWeightKg={profile?.weight_kg}
-            cardDelay={(cardDelays[1] + 20) / 1000}
-          />
-
-          {profile?.trainer === 'calisthenics' ? (
-            <BodyweightSkillTracker profileId={profile.id} cardDelay={(cardDelays[1] + 30) / 1000} />
-          ) : null}
-
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: cardDelays[1] + 40 }}
-            className="glass"
-            style={{ padding: 0, marginBottom: 14, overflow: 'hidden' }}
-          >
-            <div
-              style={{
-                padding: '16px 18px',
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'flex-start',
-                gap: 12,
-                borderBottom: '1px solid rgba(110,231,183,0.05)',
-              }}
-            >
-              <div>
-                <div style={{ fontSize: 16, fontWeight: 700, color: '#fff' }}>Progress photos</div>
-                <div style={{ fontSize: 11, color: '#4A6B58', marginTop: 4, lineHeight: 1.4 }}>
-                  Add new check-in photos whenever you want — same angles help comparisons.
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setPhotoModalOpen(true)}
-                style={{
-                  padding: '6px 14px',
-                  borderRadius: 100,
-                  background: 'rgba(110,231,183,0.1)',
-                  border: '1px solid rgba(110,231,183,0.15)',
-                  color: '#6EE7B7',
-                  fontSize: 11,
-                  fontWeight: 700,
-                  flexShrink: 0,
-                }}
-              >
-                + Add photo
-              </button>
-            </div>
-            <ProgressTimeline
-              photos={progressPhotos}
-              onAdd={() => setPhotoModalOpen(true)}
-              onSelectPhoto={(p) => setPhotoDetail(p)}
-            />
-            {progressPhotos.length >= 2 && (
-              <div style={{ padding: '0 18px 16px' }}>
-                <div style={{ fontSize: 12, color: '#2D5B3F', fontWeight: 600, marginBottom: 8 }}>Body fat trend (estimated)</div>
-                <BodyFatLineChart photos={progressPhotos} height={140} />
-              </div>
-            )}
-          </motion.div>
-
-          {/* Adjust program (free-form) */}
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: cardDelays[1] + 50 }}
-            className="glass"
-            style={{
-              padding: 18,
-              marginBottom: 14,
-              border: '1px solid rgba(110,231,183,0.14)',
-              background: 'rgba(14, 20, 14, 0.92)',
-              WebkitBackfaceVisibility: 'visible',
-            }}
-          >
-            <div style={{ fontSize: 15, fontWeight: 800, color: '#fff', marginBottom: 6 }}>Change your program</div>
-            <p style={{ fontSize: 12, color: '#8BAFA0', lineHeight: 1.5, marginBottom: 12 }}>
-              Tell the coach anything you want different—schedule, exercises, equipment, injuries, diet tweaks, macro targets, foods to avoid, etc. We&apos;ll regenerate your active plan using your saved quiz answers plus these notes.
-            </p>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
-              {[
-                { id: 'both', label: 'Workout + meals' },
-                { id: 'workout', label: 'Workout only' },
-                { id: 'meal', label: 'Meals only' },
-              ].map(({ id, label }) => (
-                <button
-                  key={id}
-                  type="button"
-                  onClick={() => setAdjustScope(id)}
-                  style={{
-                    padding: '8px 14px',
-                    borderRadius: 100,
-                    border: adjustScope === id ? '1px solid rgba(110,231,183,0.45)' : '1px solid rgba(110,231,183,0.12)',
-                    background: adjustScope === id ? 'rgba(16,185,129,0.2)' : 'rgba(14,20,14,0.5)',
-                    color: adjustScope === id ? '#6EE7B7' : '#A7C4B8',
-                    fontSize: 12,
-                    fontWeight: 600,
-                    cursor: 'pointer',
-                  }}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-            <textarea
-              value={programAdjustText}
-              onChange={(e) => {
-                setProgramAdjustText(e.target.value.slice(0, 2000))
-                if (adjustError) setAdjustError(null)
-              }}
-              placeholder="e.g. Swap barbell bench for dumbbells, only have 3 days/week now, no dairy, more protein at breakfast…"
-              rows={4}
-              style={{
-                width: '100%',
-                boxSizing: 'border-box',
-                padding: '12px 14px',
-                borderRadius: 12,
-                border: '1px solid rgba(110,231,183,0.15)',
-                background: 'rgba(8,12,8,0.65)',
-                color: '#E2FBE8',
-                fontSize: 14,
-                fontFamily: "'Outfit', sans-serif",
-                resize: 'vertical',
-                minHeight: 96,
-                marginBottom: 10,
-              }}
-            />
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
-              <span style={{ fontSize: 11, color: '#4A6B58' }}>{programAdjustText.length}/2000</span>
-              <button
-                type="button"
-                disabled={adjustLoading || !programAdjustText.trim()}
-                onClick={handleRegenerateWithAdjustments}
-                style={{
-                  padding: '12px 20px',
-                  borderRadius: 12,
-                  border: 'none',
-                  background:
-                    adjustLoading || !programAdjustText.trim()
-                      ? 'rgba(74,107,88,0.4)'
-                      : 'linear-gradient(135deg, #10B981, #6EE7B7)',
-                  color: adjustLoading || !programAdjustText.trim() ? '#6B8F7A' : '#070B07',
-                  fontSize: 14,
-                  fontWeight: 700,
-                  cursor: adjustLoading || !programAdjustText.trim() ? 'not-allowed' : 'pointer',
-                }}
-              >
-                {adjustLoading ? 'Updating…' : 'Update program'}
-              </button>
-            </div>
-            {adjustError && (
-              <p style={{ fontSize: 12, color: '#FB7185', marginTop: 10, marginBottom: 0 }}>{adjustError}</p>
-            )}
-          </motion.div>
-
-      {/* C. Muscle Coverage (weekly) */}
-      {workoutContent?.days?.length > 0 && (
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: cardDelays[2] }}
-          className="glass"
-          style={{ padding: 18, marginBottom: 14 }}
-        >
-          <div style={{ fontSize: 14, fontWeight: 700, color: '#fff', marginBottom: 4 }}>Muscle Coverage</div>
-          <div style={{ fontSize: 11, color: '#2D5B3F', marginBottom: 12 }}>This week</div>
-          <WorkoutMuscleMap
-            exerciseNames={(workoutContent.days || []).flatMap((d) => (d.exercises || []).map((e) => e.name))}
-            view="both"
-            size="medium"
-          />
-        </motion.div>
-      )}
-
-      {/* D. Progress Chart */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: cardDelays[2] }}
-        className="glass"
-        style={{ padding: 18, marginBottom: 14 }}
-      >
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-          <div style={{ fontSize: 14, fontWeight: 700, color: '#fff' }}>Weight Progress</div>
-          <button
-            onClick={() => setWeightModalOpen(true)}
-            style={{
-              padding: '6px 12px',
-              borderRadius: 10,
-              border: '1px solid rgba(110,231,183,0.2)',
-              background: 'rgba(110,231,183,0.08)',
-              color: '#6EE7B7',
-              fontSize: 11,
-              fontWeight: 600,
-            }}
-          >
-            Log Weight
-          </button>
-        </div>
-        <ProgressChart data={weightLogs} targetWeight={profile.target_weight} height={chartHeight} />
-      </motion.div>
-
-      {/* G. Meal Plan Meals (only when plan exists) */}
-      {mealContent && mealContent.meals?.length > 0 && (
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: cardDelays[5] }}
-          className="glass"
-          style={{ padding: 0, marginBottom: 14, overflow: 'hidden' }}
-        >
-          <div style={{ padding: '16px 18px', borderBottom: '1px solid rgba(110,231,183,0.05)' }}>
-            <div style={{ fontSize: 16, fontWeight: 700, color: '#fff' }}>Your Meal Plan</div>
-          </div>
-          <div style={{ padding: '4px 18px 14px' }}>
-            {['🍳', '🥗', '🍌', '🥩'].map((emoji, i) => {
-              const m = mealContent.meals[i]
-              if (!m) return null
-              return (
-                <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '11px 0', borderBottom: i < mealContent.meals.length - 1 ? '1px solid rgba(110,231,183,0.04)' : 'none' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <span style={{ fontSize: 18 }}>{emoji}</span>
-                    <div>
-                      <div style={{ fontSize: 13, fontWeight: 600, color: '#D1FAE5' }}>{m.name}</div>
-                      <div style={{ fontSize: 11, color: '#1F4030' }}>{m.description}</div>
-                    </div>
-                  </div>
-                  <div style={{ textAlign: 'right' }}>
-                    <div style={{ fontSize: 13, fontWeight: 700, color: '#fff' }}>{m.calories} cal</div>
-                    <div className="gradient-accent" style={{ fontSize: 10, fontWeight: 600 }}>{m.protein}g protein</div>
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        </motion.div>
-      )}
-
-      {/* H. Body Progress */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: cardDelays[5] }}
-        className="glass"
-        style={{ padding: 18, marginBottom: 14 }}
-      >
-        <div style={{ fontSize: 16, fontWeight: 700, color: '#fff', marginBottom: 4 }}>Body Progress</div>
-        <div style={{ fontSize: 12, color: '#2D5B3F', marginBottom: 14 }}>Track your physique. Goal can be someone whose body you want to achieve.</div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-          <BodyImageSlot
-            label="My current physique"
-            imageUrl={profile.body_image_url}
-            userId={user?.id}
-            profileId={profile.id}
-            slot="current"
-            onUpload={refreshProfile}
-          />
-          <BodyImageSlot
-            label="Body I want to achieve"
-            hint="e.g. athlete or reference photo"
-            imageUrl={profile.goal_body_image_url}
-            userId={user?.id}
-            profileId={profile.id}
-            slot="goal"
-            onUpload={refreshProfile}
-          />
-        </div>
-      </motion.div>
-
-      {/* I. Get AI Analysis */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: cardDelays[6] }}
-        className="glass"
-        style={{ padding: 18, marginBottom: 14 }}
-      >
-        <div style={{ fontSize: 16, fontWeight: 700, color: '#fff', marginBottom: 4 }}>Get AI Analysis</div>
-        <div style={{ fontSize: 12, color: '#2D5B3F', marginBottom: 14 }}>Review your habits and get personalized recommendations</div>
-        <button
-          onClick={handleAnalyze}
-          disabled={analysisLoading}
-          style={{
-            width: '100%',
-            padding: 14,
-            borderRadius: 12,
-            border: '1px solid rgba(110,231,183,0.3)',
-            background: 'rgba(16,185,129,0.2)',
-            color: '#6EE7B7',
-            fontSize: 14,
-            fontWeight: 600,
-            opacity: analysisLoading ? 0.7 : 1,
-          }}
-        >
-          {analysisLoading ? 'Analyzing...' : 'Analyze my progress'}
-        </button>
-        {analysisResult && (
-          <div
-            style={{
-              marginTop: 14,
-              padding: 14,
-              background: 'rgba(14,20,14,0.6)',
-              borderRadius: 12,
-              border: '1px solid rgba(110,231,183,0.1)',
-              fontSize: 13,
-              color: '#D1FAE5',
-              whiteSpace: 'pre-wrap',
-              lineHeight: 1.5,
-            }}
-          >
-            {analysisResult}
-          </div>
-        )}
-        {analysisResult && (
-          <button
-            onClick={() => router.push('/plans')}
-            style={{
-              width: '100%',
-              marginTop: 10,
-              padding: 12,
-              borderRadius: 10,
-              border: 'none',
-              background: 'linear-gradient(135deg, #10B981, #6EE7B7)',
-              color: '#070B07',
-              fontSize: 13,
-              fontWeight: 600,
-            }}
-          >
-            Create Plan →
-          </button>
-        )}
-      </motion.div>
-
-      {/* J. More shortcuts (large tap targets) */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: cardDelays[7] }}
-        style={{ marginBottom: 8 }}
-      >
-        <div style={{ fontSize: 11, color: '#2D5B3F', fontWeight: 700, marginBottom: 10 }}>MORE</div>
-        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-        <button
-          onClick={() => router.push('/plans?coach=1')}
-          className="glass-sm"
-          style={{ flex: 1, minWidth: 100, padding: 14, textAlign: 'center', border: '1px solid rgba(110,231,183,0.1)' }}
-        >
-          <div style={{ fontSize: 20, marginBottom: 4 }}>💬</div>
-          <div style={{ fontSize: 11, fontWeight: 600, color: '#6EE7B7' }}>Ask {(trainer.name || 'Coach').split(/\s+/).pop()}</div>
-        </button>
-        <button
-          onClick={() => setFoodLogModalOpen(true)}
-          className="glass-sm"
-          style={{ flex: 1, minWidth: 100, padding: 14, textAlign: 'center', border: '1px solid rgba(110,231,183,0.1)' }}
-        >
-          <div style={{ fontSize: 20, marginBottom: 4 }}>🍽️</div>
-          <div style={{ fontSize: 11, fontWeight: 600, color: '#6EE7B7' }}>Log Meal</div>
-        </button>
-        <button
-          onClick={() => setWorkoutLogModalOpen(true)}
-          className="glass-sm"
-          style={{ flex: 1, minWidth: 100, padding: 14, textAlign: 'center', border: '1px solid rgba(110,231,183,0.1)' }}
-        >
-          <div style={{ fontSize: 20, marginBottom: 4 }}>🏋️</div>
-          <div style={{ fontSize: 11, fontWeight: 600, color: '#6EE7B7' }}>Log Workout</div>
-        </button>
-        <button
-          onClick={() => setPhotoModalOpen(true)}
-          className="glass-sm"
-          style={{ flex: 1, minWidth: 100, padding: 14, textAlign: 'center', border: '1px solid rgba(110,231,183,0.1)' }}
-        >
-          <div style={{ fontSize: 20, marginBottom: 4 }}>📷</div>
-          <div style={{ fontSize: 11, fontWeight: 600, color: '#6EE7B7' }}>Body Check</div>
-        </button>
-        <button
-          onClick={() => setWeightModalOpen(true)}
-          className="glass-sm"
-          style={{ flex: 1, minWidth: 100, padding: 14, textAlign: 'center', border: '1px solid rgba(110,231,183,0.1)' }}
-        >
-          <div style={{ fontSize: 20, marginBottom: 4 }}>⚖️</div>
-          <div style={{ fontSize: 11, fontWeight: 600, color: '#6EE7B7' }}>Log Weight</div>
-        </button>
-        </div>
-        <div style={{ fontSize: 11, color: '#4A6B58', marginTop: 12, marginBottom: 24, lineHeight: 1.45 }}>
-          Plans &amp; photos are up top too — scroll less, tap more.
-        </div>
-      </motion.div>
-
-        </>
-      ) : null}
-
+function DashboardModals({
+  profile,
+  trainer,
+  progressPhotos,
+  latestProgressSessionId,
+  photoModalOpen,
+  setPhotoModalOpen,
+  compareOpen,
+  setCompareOpen,
+  photoDetail,
+  setPhotoDetail,
+  trainerModalOpen,
+  setTrainerModalOpen,
+  foodLogModalOpen,
+  setFoodLogModalOpen,
+  workoutLogModalOpen,
+  setWorkoutLogModalOpen,
+  onProgressPhotoSaved,
+  onDeleteProgressPhoto,
+  onSelectTrainer,
+  onMealLogged,
+  onWorkoutLogged,
+}) {
+  return (
+    <>
       <PhotoUploadModal
         isOpen={photoModalOpen}
         onClose={() => setPhotoModalOpen(false)}
         profile={profile}
         latestSessionId={latestProgressSessionId}
-        onSaved={handleProgressPhotoSaved}
+        onSaved={onProgressPhotoSaved}
       />
       <CompareModal
         isOpen={compareOpen}
@@ -1881,44 +732,27 @@ export default function Dashboard() {
         photo={photoDetail}
         onClose={() => setPhotoDetail(null)}
         onCompare={progressPhotos.length >= 2 ? () => setCompareOpen(true) : undefined}
-        onDelete={handleDeleteProgressPhoto}
-      />
-
-      <WeightModal
-        open={weightModalOpen}
-        onClose={() => setWeightModalOpen(false)}
-        profile={profile}
-        onSave={handleLogWeight}
+        onDelete={onDeleteProgressPhoto}
       />
       <TrainerModal
         open={trainerModalOpen}
         onClose={() => setTrainerModalOpen(false)}
         profile={profile}
         currentTrainer={trainer}
-        onSelect={handleSelectTrainer}
+        onSelect={onSelectTrainer}
       />
       <FoodLogModal
         open={foodLogModalOpen}
         onClose={() => setFoodLogModalOpen(false)}
         profileId={profile?.id}
-        onLog={handleMealLogged}
+        onLog={onMealLogged}
       />
       <LogWorkoutModal
         open={workoutLogModalOpen}
         onClose={() => setWorkoutLogModalOpen(false)}
         profileId={profile?.id}
-        onLog={handleWorkoutLogged}
+        onLog={onWorkoutLogged}
       />
-    </div>
+    </>
   )
-}
-
-function formatDateLabel(dateStr) {
-  if (!dateStr) return ''
-  const date = new Date(dateStr)
-  const now = new Date()
-  const diff = now - date
-  if (diff < 86400000) return 'Today'
-  if (diff < 172800000) return 'Yesterday'
-  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
 }
