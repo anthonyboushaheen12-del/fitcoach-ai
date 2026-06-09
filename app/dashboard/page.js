@@ -326,6 +326,7 @@ export default function Dashboard() {
   const profileResolutionTimedOut = useProfileResolutionTimeout(user, authProfile, 3000)
   const [trainerModalOpen, setTrainerModalOpen] = useState(false)
   const [foodLogModalOpen, setFoodLogModalOpen] = useState(false)
+  const [foodLogOpenWithCamera, setFoodLogOpenWithCamera] = useState(false)
   const [workoutLogModalOpen, setWorkoutLogModalOpen] = useState(false)
   const [toast, setToast] = useState(null)
   const [todayMeals, setTodayMeals] = useState([])
@@ -372,10 +373,22 @@ export default function Dashboard() {
   useEffect(() => {
     if (typeof window === 'undefined') return
     const q = new URLSearchParams(window.location.search)
-    if (q.get('logMeal') !== '1') return
+    const logMeal = q.get('logMeal')
+    if (logMeal !== '1' && logMeal !== 'scan') return
+    setFoodLogOpenWithCamera(logMeal === 'scan')
     setFoodLogModalOpen(true)
     router.replace('/dashboard', { scroll: false })
   }, [router])
+
+  function openFoodLog({ camera = false } = {}) {
+    setFoodLogOpenWithCamera(camera)
+    setFoodLogModalOpen(true)
+  }
+
+  function closeFoodLog() {
+    setFoodLogModalOpen(false)
+    setFoodLogOpenWithCamera(false)
+  }
 
   useEffect(() => {
     if (!user) {
@@ -611,6 +624,8 @@ export default function Dashboard() {
           trainerModalOpen={trainerModalOpen}
           setTrainerModalOpen={setTrainerModalOpen}
           foodLogModalOpen={foodLogModalOpen}
+          foodLogOpenWithCamera={foodLogOpenWithCamera}
+          onCloseFoodLog={closeFoodLog}
           setFoodLogModalOpen={setFoodLogModalOpen}
           workoutLogModalOpen={workoutLogModalOpen}
           setWorkoutLogModalOpen={setWorkoutLogModalOpen}
@@ -638,7 +653,8 @@ export default function Dashboard() {
       />
       <TodaysMealsCard
         todayMeals={todayMeals}
-        onLogMeal={() => setFoodLogModalOpen(true)}
+        onLogMeal={() => openFoodLog()}
+        onScanMeal={() => openFoodLog({ camera: true })}
         onCreateMealPlan={() => router.push('/plans')}
         hasMealPlan={hasMealPlan}
         cardDelay={cardDelays[2]}
@@ -676,6 +692,8 @@ export default function Dashboard() {
         trainerModalOpen={trainerModalOpen}
         setTrainerModalOpen={setTrainerModalOpen}
         foodLogModalOpen={foodLogModalOpen}
+        foodLogOpenWithCamera={foodLogOpenWithCamera}
+        onCloseFoodLog={closeFoodLog}
         setFoodLogModalOpen={setFoodLogModalOpen}
         workoutLogModalOpen={workoutLogModalOpen}
         setWorkoutLogModalOpen={setWorkoutLogModalOpen}
@@ -703,6 +721,8 @@ function DashboardModals({
   trainerModalOpen,
   setTrainerModalOpen,
   foodLogModalOpen,
+  foodLogOpenWithCamera,
+  onCloseFoodLog,
   setFoodLogModalOpen,
   workoutLogModalOpen,
   setWorkoutLogModalOpen,
@@ -743,7 +763,8 @@ function DashboardModals({
       />
       <FoodLogModal
         open={foodLogModalOpen}
-        onClose={() => setFoodLogModalOpen(false)}
+        onClose={onCloseFoodLog || (() => setFoodLogModalOpen(false))}
+        openWithCamera={foodLogOpenWithCamera}
         profileId={profile?.id}
         onLog={onMealLogged}
       />

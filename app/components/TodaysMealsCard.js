@@ -5,6 +5,7 @@ import { motion } from 'framer-motion'
 export default function TodaysMealsCard({
   todayMeals,
   onLogMeal,
+  onScanMeal,
   onCreateMealPlan,
   hasMealPlan,
   cardDelay = 0,
@@ -33,22 +34,40 @@ export default function TodaysMealsCard({
             Today ({todayMeals.length} logged)
           </div>
         </div>
-        <button
-          type="button"
-          onClick={onLogMeal}
-          style={{
-            padding: '10px 16px',
-            borderRadius: 12,
-            border: '1px solid rgba(110,231,183,0.35)',
-            background: 'rgba(16,185,129,0.2)',
-            color: '#6EE7B7',
-            fontSize: 13,
-            fontWeight: 700,
-            flexShrink: 0,
-          }}
-        >
-          + Log meal
-        </button>
+        <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+          {onScanMeal ? (
+            <button
+              type="button"
+              onClick={onScanMeal}
+              style={{
+                padding: '10px 14px',
+                borderRadius: 12,
+                border: 'none',
+                background: 'linear-gradient(135deg, #10B981, #6EE7B7)',
+                color: '#070B07',
+                fontSize: 13,
+                fontWeight: 700,
+              }}
+            >
+              📷 Scan
+            </button>
+          ) : null}
+          <button
+            type="button"
+            onClick={onLogMeal}
+            style={{
+              padding: '10px 16px',
+              borderRadius: 12,
+              border: '1px solid rgba(110,231,183,0.35)',
+              background: 'rgba(16,185,129,0.2)',
+              color: '#6EE7B7',
+              fontSize: 13,
+              fontWeight: 700,
+            }}
+          >
+            + Log meal
+          </button>
+        </div>
       </div>
       <div style={{ padding: '10px 16px 14px' }}>
         {todayMeals.length === 0 ? (

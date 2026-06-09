@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { supabase } from '../../lib/supabase'
 import { compressImageForUpload } from '../../lib/image-compress'
@@ -52,7 +52,10 @@ function useDebounce(value, delay) {
   return debouncedValue
 }
 
-export default function FoodLogModal({ open, onClose, profileId, onLog }) {
+export default function FoodLogModal({ open, onClose, profileId, onLog, openWithCamera = false }) {
+  const cameraInputRef = useRef(null)
+  const galleryInputRef = useRef(null)
+  const attachInputRef = useRef(null)
   const [mealType, setMealType] = useState('breakfast')
   const [search, setSearch] = useState('')
   const [results, setResults] = useState([])
@@ -83,8 +86,13 @@ export default function FoodLogModal({ open, onClose, profileId, onLog }) {
       setAnalysisTotals(null)
       setIncludePhotoWithLog(false)
       setMealSnapForLog(null)
+      return
     }
-  }, [open])
+    if (openWithCamera && cameraInputRef.current) {
+      const t = setTimeout(() => cameraInputRef.current?.click(), 350)
+      return () => clearTimeout(t)
+    }
+  }, [open, openWithCamera])
 
   useEffect(() => {
     if (!debouncedSearch?.trim()) {
@@ -388,30 +396,65 @@ export default function FoodLogModal({ open, onClose, profileId, onLog }) {
             <div style={{ fontSize: 10, color: '#2D5B3F', fontWeight: 700, letterSpacing: 0.5, marginBottom: 10 }}>
               PHOTO OR TEXT
             </div>
-          <label
-            style={{
-              display: 'block',
-              marginBottom: 12,
-              padding: '12px 16px',
-              borderRadius: 14,
-              border: '1px dashed rgba(110,231,183,0.35)',
-              background: 'rgba(110,231,183,0.06)',
-              cursor: photoBusy ? 'wait' : 'pointer',
-              textAlign: 'center',
-              fontSize: 13,
-              fontWeight: 600,
-              color: photoBusy ? '#2D5B3F' : '#6EE7B7',
-            }}
-          >
-            <input
-              type="file"
-              accept="image/jpeg,image/png,image/webp"
-              style={{ display: 'none' }}
+          <input
+            ref={cameraInputRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            style={{ display: 'none' }}
+            disabled={photoBusy}
+            onChange={handleMealPhotoChange}
+          />
+          <input
+            ref={galleryInputRef}
+            type="file"
+            accept="image/jpeg,image/png,image/webp"
+            style={{ display: 'none' }}
+            disabled={photoBusy}
+            onChange={handleMealPhotoChange}
+          />
+          <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
+            <button
+              type="button"
               disabled={photoBusy}
-              onChange={handleMealPhotoChange}
-            />
-            {photoBusy ? 'Analyzing photo...' : 'Scan or upload meal photo'}
-          </label>
+              onClick={() => cameraInputRef.current?.click()}
+              style={{
+                flex: 1,
+                minWidth: 120,
+                padding: '12px 14px',
+                borderRadius: 14,
+                border: '1px solid rgba(110,231,183,0.45)',
+                background: 'linear-gradient(135deg, rgba(16,185,129,0.35), rgba(110,231,183,0.2))',
+                cursor: photoBusy ? 'wait' : 'pointer',
+                textAlign: 'center',
+                fontSize: 13,
+                fontWeight: 700,
+                color: photoBusy ? '#2D5B3F' : '#D1FAE5',
+              }}
+            >
+              {photoBusy ? 'Analyzing…' : '📷 Scan meal'}
+            </button>
+            <button
+              type="button"
+              disabled={photoBusy}
+              onClick={() => galleryInputRef.current?.click()}
+              style={{
+                flex: 1,
+                minWidth: 120,
+                padding: '12px 14px',
+                borderRadius: 14,
+                border: '1px dashed rgba(110,231,183,0.35)',
+                background: 'rgba(110,231,183,0.06)',
+                cursor: photoBusy ? 'wait' : 'pointer',
+                textAlign: 'center',
+                fontSize: 13,
+                fontWeight: 600,
+                color: photoBusy ? '#2D5B3F' : '#6EE7B7',
+              }}
+            >
+              Gallery
+            </button>
+          </div>
           {photoHint && (
             <div style={{ fontSize: 12, color: '#A7C4B8', marginBottom: 12, lineHeight: 1.45 }}>{photoHint}</div>
           )}
@@ -480,6 +523,7 @@ export default function FoodLogModal({ open, onClose, profileId, onLog }) {
             }}
           >
             <input
+              ref={attachInputRef}
               type="file"
               accept="image/jpeg,image/png,image/webp"
               style={{ display: 'none' }}

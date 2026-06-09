@@ -25,6 +25,21 @@ function excerptPlan(obj, max = 3800) {
   }
 }
 
+/** Questions belong in Q&A — not full plan regeneration. */
+function isLikelyQuestion(text) {
+  const t = text.trim()
+  if (!t) return false
+  if (t.endsWith('?')) return true
+  return /\b(what should|what do i|what can i|what would|which (day|workout|exercise)|should i (train|workout|eat|do)|what to (eat|workout|train)|how much|can i eat|do i need|what did i|yesterday i did|today i should)\b/i.test(
+    t
+  )
+}
+
+function formatApiError(data, fallback) {
+  const parts = [data?.error, data?.details].filter((p) => typeof p === 'string' && p.trim())
+  return parts.length ? parts.join(': ') : fallback
+}
+
 export default function PlanCoachPanel({
   profile,
   activeWorkoutContent,
@@ -61,45 +76,66 @@ export default function PlanCoachPanel({
     setOpen(true)
   }, [seedMessage])
 
+  const askCoachQuestion = useCallback(
+    async (questionText, { fromAdjust = false } = {}) => {
+      const q = questionText.trim()
+      if (!q || !profile?.id) return
+      setAskError(null)
+      setAsking(true)
+      const history = messages.map((m) => ({ role: m.role, text: m.text }))
+      setMessages((prev) => [...prev, { role: 'user', text: q }])
+      if (fromAdjust) {
+        setAdjustText('')
+        setAdjustOk('Answered below — use Ask for follow-ups.')
+        setTimeout(() => setAdjustOk(null), 4000)
+      } else {
+        setInput('')
+      }
+      try {
+        const res = await fetch('/api/plan-qa', {
+          method: 'POST',
+          headers: await jsonHeadersWithAuth(),
+          body: JSON.stringify({
+            profileId: profile.id,
+            question: q,
+            history,
+            workoutExcerpt: excerptPlan(activeWorkoutContent),
+            mealExcerpt: excerptPlan(activeMealContent),
+            mealTargetsSummary: mealPlanAuthoritativeSummary(activeMealContent),
+          }),
+        })
+        const data = await res.json().catch(() => ({}))
+        if (!res.ok) {
+          throw new Error(formatApiError(data, `Request failed (${res.status})`))
+        }
+        const reply = data.reply || 'No response.'
+        setMessages((prev) => [...prev, { role: 'assistant', text: reply }])
+      } catch (e) {
+        setAskError(e?.message || 'Something went wrong')
+        setMessages((prev) => prev.slice(0, -1))
+        if (fromAdjust) setAdjustText(q)
+        else setInput(q)
+      } finally {
+        setAsking(false)
+      }
+    },
+    [profile?.id, messages, activeWorkoutContent, activeMealContent]
+  )
+
   const sendQuestion = useCallback(async () => {
     const q = input.trim()
     if (!q || !profile?.id) return
-    setAskError(null)
-    setAsking(true)
-    const history = messages.map((m) => ({ role: m.role, text: m.text }))
-    setMessages((prev) => [...prev, { role: 'user', text: q }])
-    setInput('')
-    try {
-      const res = await fetch('/api/plan-qa', {
-        method: 'POST',
-        headers: await jsonHeadersWithAuth(),
-        body: JSON.stringify({
-          profileId: profile.id,
-          question: q,
-          history,
-          workoutExcerpt: excerptPlan(activeWorkoutContent),
-          mealExcerpt: excerptPlan(activeMealContent),
-          mealTargetsSummary: mealPlanAuthoritativeSummary(activeMealContent),
-        }),
-      })
-      const data = await res.json().catch(() => ({}))
-      if (!res.ok) {
-        throw new Error(data.error || data.details || `Request failed (${res.status})`)
-      }
-      const reply = data.reply || 'No response.'
-      setMessages((prev) => [...prev, { role: 'assistant', text: reply }])
-    } catch (e) {
-      setAskError(e?.message || 'Something went wrong')
-      setMessages((prev) => prev.slice(0, -1))
-      setInput(q)
-    } finally {
-      setAsking(false)
-    }
-  }, [input, profile?.id, messages, activeWorkoutContent, activeMealContent])
+    await askCoachQuestion(q)
+  }, [input, profile?.id, askCoachQuestion])
 
   async function submitAdjust() {
     const text = adjustText.trim()
     if (!text || !profile?.id) return
+    if (isLikelyQuestion(text)) {
+      setAdjustError(null)
+      await askCoachQuestion(text, { fromAdjust: true })
+      return
+    }
     setAdjustBusy(true)
     setAdjustError(null)
     setAdjustOk(null)
@@ -130,7 +166,7 @@ export default function PlanCoachPanel({
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok || !data.success) {
-        throw new Error(data.error || data.details || 'Could not update your program')
+        throw new Error(formatApiError(data, 'Could not update your program'))
       }
       await onRefreshPlans?.()
       setAdjustText('')
@@ -169,77 +205,8 @@ export default function PlanCoachPanel({
       {open && (
         <div style={{ padding: '0 16px 16px', borderTop: '1px solid rgba(110,231,183,0.06)' }}>
           <p style={{ fontSize: 12, color: '#4A6B58', lineHeight: 1.45, margin: '12px 0' }}>
-            Ask about today&apos;s exercises, swaps, or nutrition. To save changes to your generated plan, describe what you want below and run update (no need to redo the full quiz).
+            Ask what to train or eat today, or get swaps and tips. Use <strong style={{ color: '#6EE7B7', fontWeight: 600 }}>Update program</strong> only when you want changes saved to your plan (e.g. &quot;swap bench for dumbbells&quot;).
           </p>
-
-          <div style={{ fontSize: 11, fontWeight: 700, color: '#2D5B3F', marginBottom: 6 }}>UPDATE PROGRAM</div>
-          <div style={{ display: 'flex', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
-            {[
-              { id: 'workout', label: 'Workout' },
-              { id: 'meal', label: 'Meals' },
-              { id: 'both', label: 'Both' },
-            ].map((o) => (
-              <button
-                key={o.id}
-                type="button"
-                onClick={() => setAdjustScope(o.id)}
-                style={{
-                  padding: '6px 12px',
-                  borderRadius: 999,
-                  border: adjustScope === o.id ? '2px solid rgba(110,231,183,0.4)' : '1px solid rgba(110,231,183,0.15)',
-                  background: adjustScope === o.id ? 'rgba(110,231,183,0.12)' : 'transparent',
-                  color: adjustScope === o.id ? '#6EE7B7' : '#2D5B3F',
-                  fontSize: 12,
-                  fontWeight: 600,
-                }}
-              >
-                {o.label}
-              </button>
-            ))}
-          </div>
-          <textarea
-            value={adjustText}
-            onChange={(e) => setAdjustText(e.target.value)}
-            placeholder="One question or instruction, e.g. “Swap barbell bench for dumbbells — bad shoulder” or “More protein at lunch”"
-            rows={3}
-            style={{
-              width: '100%',
-              padding: 12,
-              borderRadius: 12,
-              border: '1px solid rgba(110,231,183,0.12)',
-              background: 'rgba(14,20,14,0.55)',
-              color: '#E2FBE8',
-              fontSize: 14,
-              marginBottom: 8,
-              resize: 'vertical',
-            }}
-          />
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-            <span style={{ fontSize: 10, color: '#4A6B58' }}>{adjustText.length}/2000</span>
-            <button
-              type="button"
-              onClick={submitAdjust}
-              disabled={adjustBusy || !adjustText.trim()}
-              style={{
-                padding: '8px 16px',
-                borderRadius: 12,
-                border: 'none',
-                background:
-                  adjustBusy || !adjustText.trim()
-                    ? 'rgba(110,231,183,0.15)'
-                    : 'linear-gradient(135deg, #10B981, #6EE7B7)',
-                color: adjustBusy || !adjustText.trim() ? '#6B8F7A' : '#070B07',
-                fontSize: 13,
-                fontWeight: 700,
-              }}
-            >
-              {adjustBusy ? 'Updating…' : 'Apply to plan'}
-            </button>
-          </div>
-          {adjustError && <div style={{ color: '#FB7185', fontSize: 12, marginBottom: 8 }}>{adjustError}</div>}
-          {adjustOk && <div style={{ color: '#6EE7B7', fontSize: 12, marginBottom: 8 }}>{adjustOk}</div>}
-
-          <div style={{ height: 1, background: 'rgba(110,231,183,0.08)', margin: '14px 0' }} />
 
           <div style={{ fontSize: 11, fontWeight: 700, color: '#2D5B3F', marginBottom: 8 }}>ASK A QUESTION</div>
           <div
@@ -253,7 +220,9 @@ export default function PlanCoachPanel({
             }}
           >
             {messages.length === 0 && (
-              <div style={{ fontSize: 12, color: '#4A6B58' }}>e.g. “What should I do if my knee hurts on lunges?”</div>
+              <div style={{ fontSize: 12, color: '#4A6B58' }}>
+                e.g. &quot;Yesterday was upper body — what should I train today?&quot;
+              </div>
             )}
             {messages.map((m, i) => (
               <div
@@ -276,7 +245,7 @@ export default function PlanCoachPanel({
             ))}
           </div>
           {askError && <div style={{ color: '#FB7185', fontSize: 12, marginBottom: 8 }}>{askError}</div>}
-          <div style={{ display: 'flex', gap: 8 }}>
+          <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
             <input
               type="text"
               value={input}
@@ -310,6 +279,80 @@ export default function PlanCoachPanel({
               {asking ? '…' : 'Send'}
             </button>
           </div>
+
+          <div style={{ height: 1, background: 'rgba(110,231,183,0.08)', margin: '14px 0' }} />
+
+          <div style={{ fontSize: 11, fontWeight: 700, color: '#2D5B3F', marginBottom: 6 }}>UPDATE PROGRAM</div>
+          <div style={{ display: 'flex', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
+            {[
+              { id: 'workout', label: 'Workout' },
+              { id: 'meal', label: 'Meals' },
+              { id: 'both', label: 'Both' },
+            ].map((o) => (
+              <button
+                key={o.id}
+                type="button"
+                onClick={() => setAdjustScope(o.id)}
+                style={{
+                  padding: '6px 12px',
+                  borderRadius: 999,
+                  border: adjustScope === o.id ? '2px solid rgba(110,231,183,0.4)' : '1px solid rgba(110,231,183,0.15)',
+                  background: adjustScope === o.id ? 'rgba(110,231,183,0.12)' : 'transparent',
+                  color: adjustScope === o.id ? '#6EE7B7' : '#2D5B3F',
+                  fontSize: 12,
+                  fontWeight: 600,
+                }}
+              >
+                {o.label}
+              </button>
+            ))}
+          </div>
+          <textarea
+            value={adjustText}
+            onChange={(e) => setAdjustText(e.target.value)}
+            placeholder="Instruction to save, e.g. “Swap barbell bench for dumbbells — bad shoulder” or “Add 30g protein at lunch”"
+            rows={3}
+            style={{
+              width: '100%',
+              padding: 12,
+              borderRadius: 12,
+              border: '1px solid rgba(110,231,183,0.12)',
+              background: 'rgba(14,20,14,0.55)',
+              color: '#E2FBE8',
+              fontSize: 14,
+              marginBottom: 8,
+              resize: 'vertical',
+            }}
+          />
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+            <span style={{ fontSize: 10, color: '#4A6B58' }}>{adjustText.length}/2000</span>
+            <button
+              type="button"
+              onClick={submitAdjust}
+              disabled={(adjustBusy || asking) || !adjustText.trim()}
+              style={{
+                padding: '8px 16px',
+                borderRadius: 12,
+                border: 'none',
+                background:
+                  adjustBusy || asking || !adjustText.trim()
+                    ? 'rgba(110,231,183,0.15)'
+                    : 'linear-gradient(135deg, #10B981, #6EE7B7)',
+                color: adjustBusy || asking || !adjustText.trim() ? '#6B8F7A' : '#070B07',
+                fontSize: 13,
+                fontWeight: 700,
+              }}
+            >
+              {adjustBusy ? 'Updating…' : asking ? 'Asking…' : isLikelyQuestion(adjustText) ? 'Ask coach' : 'Apply to plan'}
+            </button>
+          </div>
+          {isLikelyQuestion(adjustText) && (
+            <div style={{ fontSize: 11, color: '#4A6B58', marginBottom: 8, lineHeight: 1.4 }}>
+              Looks like a question — we&apos;ll answer without regenerating your whole plan.
+            </div>
+          )}
+          {adjustError && <div style={{ color: '#FB7185', fontSize: 12, marginBottom: 8 }}>{adjustError}</div>}
+          {adjustOk && <div style={{ color: '#6EE7B7', fontSize: 12, marginBottom: 8 }}>{adjustOk}</div>}
         </div>
       )}
     </div>
