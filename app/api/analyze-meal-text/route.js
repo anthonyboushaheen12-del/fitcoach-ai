@@ -1,20 +1,39 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { createSupabaseUserJwtClient, getBearerToken } from '../../../lib/supabase-api-route'
+import {
+  extractJsonObject,
+  normalizeMealAnalysis,
+  FALLBACK_MEAL_ANALYSIS,
+} from '../../../lib/meal-analysis'
 
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY || '',
 })
 
-const FALLBACK = {
-  mealLabel: 'Meal',
-  items: [],
-  totalCalories: null,
-  totalProteinG: null,
-  totalCarbsG: null,
-  totalFatsG: null,
-  confidence: 'low',
-  notes: 'Could not parse this description. Try listing foods and rough amounts (e.g. 2 eggs, toast, coffee).',
+const MEAL_JSON_SYSTEM = `You are a nutrition assistant. Respond ONLY with valid JSON — no markdown, no code fences, no text before or after.
+
+Schema:
+{
+  "mealLabel": "short label e.g. Chicken rice bowl",
+  "items": [
+    {
+      "name": "food name",
+      "grams": 180,
+      "calories": 320,
+      "protein": 28,
+      "carbs": 35,
+      "fats": 9
+    }
+  ],
+  "totalCalories": 650,
+  "totalProteinG": 45,
+  "totalCarbsG": 60,
+  "totalFatsG": 18,
+  "confidence": "high" | "medium" | "low",
+  "notes": "one short sentence on uncertainty or tips"
 }
+
+Use integers for grams and round macros sensibly. If the text is not about food or is unusable, return items: [] and confidence: "low".`
 
 export async function POST(request) {
   try {
@@ -51,65 +70,72 @@ export async function POST(request) {
     }
 
     if (!process.env.ANTHROPIC_API_KEY) {
-      return Response.json({ analysis: FALLBACK, warning: 'Server misconfiguration' }, { status: 200 })
+      return Response.json(
+        { analysis: FALLBACK_MEAL_ANALYSIS, warning: 'Server misconfiguration', error: 'ANTHROPIC_API_KEY is not set' },
+        { status: 503 }
+      )
     }
 
     const response = await anthropic.messages.create({
       model: 'claude-sonnet-4-20250514',
       max_tokens: 1200,
+      system: MEAL_JSON_SYSTEM,
       messages: [
         {
           role: 'user',
-          content: `You are a nutrition assistant. The user described what they ate in natural language. Infer foods, reasonable portion sizes (grams), and approximate macros per item for the full meal they described.
-
-User description:
-"""
-${desc.slice(0, 4000)}
-"""
+          content: `The user described what they ate in natural language. Infer foods, reasonable portion sizes (grams), and approximate macros per item for the full meal they described.
 
 Rules:
 - Interpret casual quantities ("big bowl", "small coffee", "a couple slices") as best-effort grams.
 - If vague, use typical single servings and lower confidence; explain briefly in notes.
 - Never claim clinical diagnosis.
-- Respond ONLY with valid JSON, no markdown or code fences:
-{
-  "mealLabel": "short label e.g. Chicken rice bowl",
-  "items": [
-    {
-      "name": "food name",
-      "grams": 180,
-      "calories": 320,
-      "protein": 28,
-      "carbs": 35,
-      "fats": 9
-    }
-  ],
-  "totalCalories": 650,
-  "totalProteinG": 45,
-  "totalCarbsG": 60,
-  "totalFatsG": 18,
-  "confidence": "high" | "medium" | "low",
-  "notes": "one short sentence on uncertainty or tips"
-}
-Use integers for grams and round macros sensibly. If the text is not about food or is unusable, return items: [] and confidence: "low".`,
+
+User description:
+"""
+${desc.slice(0, 4000)}
+"""`,
         },
       ],
     })
 
-    const text = response.content[0].text.trim()
-    const clean = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
-    let analysis
-    try {
-      analysis = JSON.parse(clean)
-    } catch {
-      return Response.json({ analysis: FALLBACK }, { status: 200 })
+    const block = response.content?.[0]
+    const text = block && block.type === 'text' ? block.text.trim() : ''
+
+    if (!text) {
+      return Response.json(
+        {
+          error: 'Empty model response',
+          details: 'No text from assistant',
+          analysis: FALLBACK_MEAL_ANALYSIS,
+        },
+        { status: 502 }
+      )
     }
 
-    if (!Array.isArray(analysis.items)) analysis.items = []
+    const parsed = extractJsonObject(text)
+    if (!parsed) {
+      console.error('Meal text JSON parse error:', text.slice(0, 500))
+      return Response.json(
+        {
+          error: 'INVALID_MEAL_JSON',
+          details: 'Could not parse meal analysis. Try listing foods and rough amounts.',
+          analysis: FALLBACK_MEAL_ANALYSIS,
+        },
+        { status: 422 }
+      )
+    }
 
+    const analysis = normalizeMealAnalysis(parsed)
     return Response.json({ analysis })
   } catch (err) {
     console.error('Meal text analysis error:', err)
-    return Response.json({ analysis: FALLBACK, error: 'Analysis failed' }, { status: 200 })
+    return Response.json(
+      {
+        error: 'Analysis failed',
+        details: err?.message || 'Unknown error',
+        analysis: FALLBACK_MEAL_ANALYSIS,
+      },
+      { status: 500 }
+    )
   }
 }

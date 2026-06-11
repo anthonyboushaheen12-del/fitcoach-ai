@@ -2,8 +2,9 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { supabase } from '../../lib/supabase'
 import { compressImageForUpload } from '../../lib/image-compress'
+import { authJsonHeaders } from '../../lib/auth-fetch-headers'
+import { foodItemFromMealAnalysis, normalizeMealAnalysis } from '../../lib/meal-analysis'
 
 const MEAL_TYPES = [
   { id: 'breakfast', label: 'Breakfast', emoji: '🍳' },
@@ -13,34 +14,11 @@ const MEAL_TYPES = [
   { id: 'other', label: 'Other', emoji: '🥛' },
 ]
 
-async function authJsonHeaders() {
-  const headers = { 'Content-Type': 'application/json' }
-  if (supabase) {
-    const { data: { session } } = await supabase.auth.getSession()
-    if (session?.access_token) headers.Authorization = `Bearer ${session.access_token}`
-  }
-  return headers
-}
-
-function foodItemFromMealAnalysis(it, portionLabel = 'photo est.') {
-  const g = Math.max(1, Math.round(Number(it.grams) || 100))
-  const cal = Number(it.calories) || 0
-  const p = Number(it.protein) || 0
-  const cb = Number(it.carbs) || 0
-  const f = Number(it.fats) || 0
-  const scale = 100 / g
-  return {
-    name: String(it.name || 'Food').slice(0, 120),
-    brand: '',
-    image: null,
-    servingSize: `${g}g (${portionLabel})`,
-    per100g: {
-      calories: cal * scale,
-      protein: p * scale,
-      carbs: cb * scale,
-      fats: f * scale,
-    },
-  }
+function formatMealApiError(data, status) {
+  const parts = [data?.error, data?.details].filter((p) => typeof p === 'string' && p.trim())
+  if (parts.length) return parts.join(': ')
+  if (status === 401) return 'Sign in again to analyze meals.'
+  return `Request failed (${status})`
 }
 
 function useDebounce(value, delay) {
@@ -56,6 +34,7 @@ export default function FoodLogModal({ open, onClose, profileId, onLog, openWith
   const cameraInputRef = useRef(null)
   const galleryInputRef = useRef(null)
   const attachInputRef = useRef(null)
+  const selectedListRef = useRef(null)
   const [mealType, setMealType] = useState('breakfast')
   const [search, setSearch] = useState('')
   const [results, setResults] = useState([])
@@ -68,6 +47,8 @@ export default function FoodLogModal({ open, onClose, profileId, onLog, openWith
   const [describeText, setDescribeText] = useState('')
   const [describeBusy, setDescribeBusy] = useState(false)
   const [describeHint, setDescribeHint] = useState(null)
+  const [describeError, setDescribeError] = useState(null)
+  const [photoError, setPhotoError] = useState(null)
   /** Last AI aggregate from photo or text analysis (for comparison with line-item totals). */
   const [analysisTotals, setAnalysisTotals] = useState(null)
   const [includePhotoWithLog, setIncludePhotoWithLog] = useState(false)
@@ -82,6 +63,8 @@ export default function FoodLogModal({ open, onClose, profileId, onLog, openWith
       setPhotoHint(null)
       setDescribeBusy(false)
       setDescribeHint(null)
+      setDescribeError(null)
+      setPhotoError(null)
       setDescribeText('')
       setAnalysisTotals(null)
       setIncludePhotoWithLog(false)
@@ -125,12 +108,43 @@ export default function FoodLogModal({ open, onClose, profileId, onLog, openWith
     setSelected((prev) => prev.map((s, i) => (i === index ? { ...s, grams: g } : s)))
   }
 
+  function scrollToSelectedFoods() {
+    setTimeout(() => {
+      selectedListRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+    }, 80)
+  }
+
+  function appendAnalysisItems(a, portionLabel) {
+    const items = a.items || []
+    const newRows = items.map((it) => {
+      const food = foodItemFromMealAnalysis(it, portionLabel)
+      const g = Math.max(1, Math.round(Number(it.grams) || 100))
+      return { ...food, grams: g }
+    })
+    if (newRows.length > 0) {
+      setSelected((prev) => [...prev, ...newRows])
+      scrollToSelectedFoods()
+    }
+    return newRows.length
+  }
+
+  function setAnalysisTotalsFrom(a, source) {
+    setAnalysisTotals({
+      source,
+      calories: Number(a.totalCalories),
+      protein: Number(a.totalProteinG),
+      carbs: Number(a.totalCarbsG),
+      fats: Number(a.totalFatsG),
+    })
+  }
+
   async function handleMealPhotoChange(e) {
     const file = e.target.files?.[0]
     e.target.value = ''
     if (!file || !profileId || !file.type.startsWith('image/')) return
     setPhotoBusy(true)
     setPhotoHint(null)
+    setPhotoError(null)
     try {
       const { base64, mediaType } = await compressImageForUpload(file)
       setMealSnapForLog({ base64, mediaType })
@@ -140,32 +154,24 @@ export default function FoodLogModal({ open, onClose, profileId, onLog, openWith
         body: JSON.stringify({ profileId, image: base64, mediaType }),
       })
       const data = await res.json().catch(() => ({}))
-      const a = data.analysis || data
-      const items = Array.isArray(a?.items) ? a.items : []
-      for (const it of items) {
-        const g = Math.max(1, Math.round(Number(it.grams) || 100))
-        addFood(foodItemFromMealAnalysis(it, 'photo est.'), g)
+      if (!res.ok) {
+        throw new Error(formatMealApiError(data, res.status))
       }
-      if (items.length === 0) {
-        setPhotoHint(typeof a?.notes === 'string' ? a.notes : 'No foods detected — try a clearer photo.')
+      const a = normalizeMealAnalysis(data.analysis || data)
+      const count = appendAnalysisItems(a, 'photo est.')
+      if (count === 0) {
+        setPhotoHint(typeof a.notes === 'string' && a.notes ? a.notes : 'No foods detected — try a clearer photo.')
         setAnalysisTotals(null)
       } else {
         setPhotoHint(
-          a?.mealLabel
-            ? `${a.mealLabel} · estimates only`
-            : 'Added from photo (estimates — adjust grams if needed).'
+          a.mealLabel ? `${a.mealLabel} · estimates only` : 'Added from photo (estimates — adjust grams if needed).'
         )
-        setAnalysisTotals({
-          source: 'photo',
-          calories: Number(a?.totalCalories),
-          protein: Number(a?.totalProteinG),
-          carbs: Number(a?.totalCarbsG),
-          fats: Number(a?.totalFatsG),
-        })
+        setAnalysisTotalsFrom(a, 'photo')
         setIncludePhotoWithLog(true)
       }
-    } catch {
-      setPhotoHint('Could not analyze photo.')
+    } catch (e) {
+      setPhotoError(e?.message || 'Could not analyze photo.')
+      setAnalysisTotals(null)
     } finally {
       setPhotoBusy(false)
     }
@@ -191,6 +197,7 @@ export default function FoodLogModal({ open, onClose, profileId, onLog, openWith
     if (!text || !profileId) return
     setDescribeBusy(true)
     setDescribeHint(null)
+    setDescribeError(null)
     try {
       const res = await fetch('/api/analyze-meal-text', {
         method: 'POST',
@@ -198,32 +205,30 @@ export default function FoodLogModal({ open, onClose, profileId, onLog, openWith
         body: JSON.stringify({ profileId, description: text }),
       })
       const data = await res.json().catch(() => ({}))
-      const a = data.analysis || data
-      const items = Array.isArray(a?.items) ? a.items : []
-      for (const it of items) {
-        const g = Math.max(1, Math.round(Number(it.grams) || 100))
-        addFood(foodItemFromMealAnalysis(it, 'described'), g)
+      if (!res.ok) {
+        throw new Error(formatMealApiError(data, res.status))
       }
-      if (items.length === 0) {
-        setDescribeHint(typeof a?.notes === 'string' ? a.notes : 'No foods parsed — try listing items more clearly.')
+      const a = normalizeMealAnalysis(data.analysis || data)
+      const count = appendAnalysisItems(a, 'described')
+      if (count === 0) {
+        setDescribeHint(
+          typeof a.notes === 'string' && a.notes
+            ? a.notes
+            : 'No foods parsed — try listing items and rough amounts (e.g. 2 eggs, toast, coffee).'
+        )
         setAnalysisTotals(null)
       } else {
         setDescribeHint(
-          a?.mealLabel
-            ? `${a.mealLabel} · estimates only`
-            : 'Added from description (estimates — adjust grams if needed).'
+          a.mealLabel
+            ? `${a.mealLabel} · ${count} item${count === 1 ? '' : 's'} added — scroll down to review`
+            : `${count} item${count === 1 ? '' : 's'} added from description — adjust grams if needed.`
         )
-        setAnalysisTotals({
-          source: 'text',
-          calories: Number(a?.totalCalories),
-          protein: Number(a?.totalProteinG),
-          carbs: Number(a?.totalCarbsG),
-          fats: Number(a?.totalFatsG),
-        })
+        setAnalysisTotalsFrom(a, 'text')
         setDescribeText('')
       }
-    } catch {
-      setDescribeHint('Could not parse description.')
+    } catch (e) {
+      setDescribeError(e?.message || 'Could not parse description.')
+      setAnalysisTotals(null)
     } finally {
       setDescribeBusy(false)
     }
@@ -455,7 +460,10 @@ export default function FoodLogModal({ open, onClose, profileId, onLog, openWith
               Gallery
             </button>
           </div>
-          {photoHint && (
+          {photoError && (
+            <div style={{ fontSize: 12, color: '#FB7185', marginBottom: 12, lineHeight: 1.45 }}>{photoError}</div>
+          )}
+          {photoHint && !photoError && (
             <div style={{ fontSize: 12, color: '#A7C4B8', marginBottom: 12, lineHeight: 1.45 }}>{photoHint}</div>
           )}
           {analysisTotals &&
@@ -589,7 +597,10 @@ export default function FoodLogModal({ open, onClose, profileId, onLog, openWith
             >
               {describeBusy ? 'Parsing…' : 'Add from description'}
             </button>
-            {describeHint && (
+            {describeError && (
+              <div style={{ fontSize: 12, color: '#FB7185', marginTop: 10, lineHeight: 1.45 }}>{describeError}</div>
+            )}
+            {describeHint && !describeError && (
               <div style={{ fontSize: 12, color: '#A7C4B8', marginTop: 10, lineHeight: 1.45 }}>
                 {describeHint}
               </div>
@@ -694,7 +705,7 @@ export default function FoodLogModal({ open, onClose, profileId, onLog, openWith
           )}
 
           {selected.length > 0 && (
-            <div style={{ marginBottom: 16 }}>
+            <div ref={selectedListRef} style={{ marginBottom: 16 }}>
               <div style={{ fontSize: 14, fontWeight: 700, color: '#fff', marginBottom: 10 }}>Selected Foods</div>
               {selected.map((s, i) => {
                 const ratio = s.grams / 100

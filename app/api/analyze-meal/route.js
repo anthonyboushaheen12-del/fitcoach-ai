@@ -1,20 +1,39 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { createSupabaseUserJwtClient, getBearerToken } from '../../../lib/supabase-api-route'
+import {
+  extractJsonObject,
+  normalizeMealAnalysis,
+  FALLBACK_MEAL_PHOTO_ANALYSIS,
+} from '../../../lib/meal-analysis'
 
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY || '',
 })
 
-const FALLBACK = {
-  mealLabel: 'Meal',
-  items: [],
-  totalCalories: null,
-  totalProteinG: null,
-  totalCarbsG: null,
-  totalFatsG: null,
-  confidence: 'low',
-  notes: 'Could not analyze this photo. Try a clearer shot with the full plate visible.',
+const MEAL_JSON_SYSTEM = `You are a nutrition assistant. Respond ONLY with valid JSON — no markdown, no code fences, no text before or after.
+
+Schema:
+{
+  "mealLabel": "short label e.g. Chicken rice bowl",
+  "items": [
+    {
+      "name": "food name",
+      "grams": 180,
+      "calories": 320,
+      "protein": 28,
+      "carbs": 35,
+      "fats": 9
+    }
+  ],
+  "totalCalories": 650,
+  "totalProteinG": 45,
+  "totalCarbsG": 60,
+  "totalFatsG": 18,
+  "confidence": "high" | "medium" | "low",
+  "notes": "one short sentence on uncertainty or tips"
 }
+
+Use integers for grams and round macros sensibly. If the image is not food, return items: [] and confidence: "low".`
 
 export async function POST(request) {
   try {
@@ -50,7 +69,14 @@ export async function POST(request) {
     }
 
     if (!process.env.ANTHROPIC_API_KEY) {
-      return Response.json({ analysis: FALLBACK, warning: 'Server misconfiguration' }, { status: 200 })
+      return Response.json(
+        {
+          analysis: FALLBACK_MEAL_PHOTO_ANALYSIS,
+          warning: 'Server misconfiguration',
+          error: 'ANTHROPIC_API_KEY is not set',
+        },
+        { status: 503 }
+      )
     }
 
     const mt = ['image/jpeg', 'image/png', 'image/webp'].includes(mediaType) ? mediaType : 'image/jpeg'
@@ -58,6 +84,7 @@ export async function POST(request) {
     const response = await anthropic.messages.create({
       model: 'claude-sonnet-4-20250514',
       max_tokens: 1200,
+      system: MEAL_JSON_SYSTEM,
       messages: [
         {
           role: 'user',
@@ -68,52 +95,55 @@ export async function POST(request) {
             },
             {
               type: 'text',
-              text: `You are a nutrition assistant. Estimate what foods are on the plate and approximate macros for the visible portion (one serving / one plate as shown).
+              text: `Estimate what foods are on the plate and approximate macros for the visible portion (one serving / one plate as shown).
 
 Rules:
 - If unsure, lower confidence and give ranges in notes.
-- Never claim clinical diagnosis.
-- Respond ONLY with valid JSON, no markdown or code fences:
-{
-  "mealLabel": "short label e.g. Chicken rice bowl",
-  "items": [
-    {
-      "name": "food name",
-      "grams": 180,
-      "calories": 320,
-      "protein": 28,
-      "carbs": 35,
-      "fats": 9
-    }
-  ],
-  "totalCalories": 650,
-  "totalProteinG": 45,
-  "totalCarbsG": 60,
-  "totalFatsG": 18,
-  "confidence": "high" | "medium" | "low",
-  "notes": "one short sentence on uncertainty or tips"
-}
-Use integers for grams and round macros sensibly. If the image is not food, return items: [] and confidence: "low".`,
+- Never claim clinical diagnosis.`,
             },
           ],
         },
       ],
     })
 
-    const text = response.content[0].text.trim()
-    const clean = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
-    let analysis
-    try {
-      analysis = JSON.parse(clean)
-    } catch {
-      return Response.json({ analysis: FALLBACK }, { status: 200 })
+    const block = response.content?.[0]
+    const text = block && block.type === 'text' ? block.text.trim() : ''
+
+    if (!text) {
+      return Response.json(
+        {
+          error: 'Empty model response',
+          details: 'No text from assistant',
+          analysis: FALLBACK_MEAL_PHOTO_ANALYSIS,
+        },
+        { status: 502 }
+      )
     }
 
-    if (!Array.isArray(analysis.items)) analysis.items = []
+    const parsed = extractJsonObject(text)
+    if (!parsed) {
+      console.error('Meal photo JSON parse error:', text.slice(0, 500))
+      return Response.json(
+        {
+          error: 'INVALID_MEAL_JSON',
+          details: 'Could not parse meal analysis from photo.',
+          analysis: FALLBACK_MEAL_PHOTO_ANALYSIS,
+        },
+        { status: 422 }
+      )
+    }
 
+    const analysis = normalizeMealAnalysis(parsed)
     return Response.json({ analysis })
   } catch (err) {
     console.error('Meal analysis error:', err)
-    return Response.json({ analysis: FALLBACK, error: 'Analysis failed' }, { status: 200 })
+    return Response.json(
+      {
+        error: 'Analysis failed',
+        details: err?.message || 'Unknown error',
+        analysis: FALLBACK_MEAL_PHOTO_ANALYSIS,
+      },
+      { status: 500 }
+    )
   }
 }
