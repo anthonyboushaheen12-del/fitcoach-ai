@@ -1,4 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk'
+import { getClaudeModel } from '../../../lib/anthropic-config'
 import {
   getTrainer,
   buildSystemPrompt,
@@ -216,7 +217,7 @@ Include at least 3-4 milestone objects when appropriate for the timeline.`
 You are an expert fitness coach and nutritionist. Output ONLY the JSON object — no other text, no markdown.`
 
     const response = await anthropic.messages.create({
-      model: 'claude-sonnet-4-20250514',
+      model: getClaudeModel(),
       max_tokens: 4096,
       system: `${systemPrompt}${jsonInstruction}`,
       messages: [

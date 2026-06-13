@@ -1,4 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk'
+import { getClaudeModel } from '../../../lib/anthropic-config'
 import { trainers } from '../../../lib/trainers'
 
 const anthropic = new Anthropic({
@@ -158,7 +159,7 @@ Respond ONLY with valid JSON, no markdown, no code fences:
     }
 
     const response = await anthropic.messages.create({
-      model: 'claude-sonnet-4-20250514',
+      model: getClaudeModel(),
       max_tokens: 512,
       messages: [{ role: 'user', content: userContent }],
     })

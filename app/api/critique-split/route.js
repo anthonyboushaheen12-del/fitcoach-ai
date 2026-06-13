@@ -1,4 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk'
+import { getClaudeModel } from '../../../lib/anthropic-config'
 import { getTrainer, buildSystemPrompt, buildOnboardingContextPrompt } from '../../../lib/trainers'
 import { createSupabaseRouteClient } from '../../../lib/supabase-api-route'
 
@@ -156,7 +157,7 @@ export async function POST(request) {
     const userPrompt = `The user pasted their CURRENT workout split/routine. Your job:\n1) Critique it: identify recovery/overlap issues, missing muscles/movement patterns, progression problems, and mismatch to their goal.\n2) Fix it if needed: produce a corrected weekly split and a complete workout-plan JSON in the same format used by this app.\n\nUSER SPLIT (verbatim):\n\"\"\"\n${clippedSplit}\n\"\"\"\n\nCONTEXT (from their setup if available):\n- Days per week target: ${wp.daysPerWeek ?? profile?.preferences?.workout?.daysPerWeek ?? 'unknown'}\n- Experience: ${wp.experience ?? profile?.preferences?.workout?.experience ?? 'unknown'}\n- Focus areas: ${focusStr || 'unknown'}\n- Equipment: ${equipStr || 'unknown'}\n- Session duration: ${wp.sessionDuration ?? profile?.preferences?.workout?.sessionDuration ?? 'unknown'}\n- Injuries/limitations: ${wp.injuries ?? profile?.preferences?.workout?.injuries ?? 'None'}\n\nRules:\n- Be conservative and safe.\n- If the split is already solid, say so, and make only small improvements.\n- Always output a complete correctedWorkoutPlan with: name, daysPerWeek, split[], todayName, todayExercises[], days[].\n- Make todayExercises match the FIRST day in correctedWorkoutPlan.days.\n- Keep exercise list practical (8-12 exercises per day max).\n\nRespond ONLY with valid JSON, no markdown, no code fences:\n{\n  \"summary\": \"1 short paragraph\",\n  \"issues\": [\n    {\"title\": \"...\", \"whyItMatters\": \"...\", \"fix\": \"...\"}\n  ],\n  \"questions\": [\"...\"],\n  \"correctedWorkoutPlan\": {\n    \"name\": \"...\",\n    \"daysPerWeek\": 4,\n    \"split\": [\"Mon: ...\"],\n    \"todayName\": \"...\",\n    \"todayExercises\": [{\"name\": \"...\", \"sets\": \"...\", \"rest\": \"...\"}],\n    \"days\": [{\"name\": \"Day 1 - ...\", \"exercises\": [{\"name\": \"...\", \"sets\": \"...\", \"rest\": \"...\"}]}]\n  }\n}`
 
     const response = await anthropic.messages.create({
-      model: 'claude-sonnet-4-20250514',
+      model: getClaudeModel(),
       max_tokens: 2200,
       system: systemPrompt,
       messages: [{ role: 'user', content: userPrompt }],

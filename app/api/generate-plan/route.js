@@ -1,8 +1,14 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { getTrainer, buildSystemPrompt, buildOnboardingContextPrompt } from '../../../lib/trainers'
-import { createSupabaseRouteClient } from '../../../lib/supabase-api-route'
+import {
+  createSupabaseRouteClient,
+  createSupabaseUserJwtClient,
+  getBearerToken,
+} from '../../../lib/supabase-api-route'
 import { computeNutritionTargets } from '../../../lib/nutrition-targets'
 import { alignMealPlanToTargets } from '../../../lib/align-meal-plan-to-targets'
+import { extractJsonObject } from '../../../lib/llm-json'
+import { formatAnthropicError, getAssistantText, getClaudeModel } from '../../../lib/anthropic-config'
 
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY || '',
@@ -60,6 +66,26 @@ function summarizeWorkoutForMeals(content) {
 }
 
 export async function POST(request) {
+  const token = getBearerToken(request)
+  if (!token) {
+    return Response.json(
+      { success: false, error: 'Unauthorized', details: 'Sign in required to generate plans.' },
+      { status: 401 }
+    )
+  }
+
+  const userSb = createSupabaseUserJwtClient(token)
+  const {
+    data: { user },
+    error: userErr,
+  } = await userSb.auth.getUser()
+  if (userErr || !user) {
+    return Response.json(
+      { success: false, error: 'Unauthorized', details: 'Session expired — sign in again.' },
+      { status: 401 }
+    )
+  }
+
   let supabase
   try {
     supabase = createSupabaseRouteClient(request)
@@ -99,6 +125,20 @@ export async function POST(request) {
       return Response.json(
         { success: false, error: 'Missing profile', details: 'profile object is required' },
         { status: 400 }
+      )
+    }
+
+    const { data: ownedProfile, error: ownErr } = await userSb
+      .from('profiles')
+      .select('id')
+      .eq('id', profileId)
+      .eq('user_id', user.id)
+      .maybeSingle()
+
+    if (ownErr || !ownedProfile) {
+      return Response.json(
+        { success: false, error: 'Forbidden', details: 'Profile not found for this account.' },
+        { status: 403 }
       )
     }
 
@@ -252,7 +292,7 @@ Use this analysis to prioritize exercises for weaker or lagging areas. If a musc
       let workoutRowInserted = false
       try {
         const workoutResponse = await anthropic.messages.create({
-          model: 'claude-sonnet-4-20250514',
+          model: getClaudeModel(),
           max_tokens: 2048,
           system: systemPrompt + '\n\nIMPORTANT: You must respond ONLY with valid JSON. No text before or after. No markdown code fences.',
           messages: [{
@@ -272,9 +312,8 @@ Include all days with all exercises. Make todayExercises match the first day.`,
         })
 
         try {
-          const workoutText = workoutResponse.content[0].text.trim()
-          const clean = workoutText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
-          workoutPlan = JSON.parse(clean)
+          const workoutText = getAssistantText(workoutResponse)
+          workoutPlan = extractJsonObject(workoutText) || JSON.parse(workoutText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim())
         } catch (e) {
           workoutPlan = {
             name: 'Workout Plan',
@@ -409,7 +448,7 @@ ${nutritionBlock}${trainingAlignText}${pantryText}${eatingText}
       let mealRowInserted = false
       try {
         const mealResponse = await anthropic.messages.create({
-          model: 'claude-sonnet-4-20250514',
+          model: getClaudeModel(),
           max_tokens: 2048,
           system: systemPrompt + '\n\nIMPORTANT: You must respond ONLY with valid JSON. No text before or after. No markdown code fences.',
           messages: [{
@@ -435,9 +474,8 @@ Meal calorie numbers should sum to about ${targets.calories} kcal (±50); they w
         })
 
         try {
-          const mealText = mealResponse.content[0].text.trim()
-          const clean = mealText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
-          mealPlan = JSON.parse(clean)
+          const mealText = getAssistantText(mealResponse)
+          mealPlan = extractJsonObject(mealText) || JSON.parse(mealText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim())
         } catch (e) {
           mealPlan = {
             name: 'Meal Plan',
@@ -504,7 +542,7 @@ Meal calorie numbers should sum to about ${targets.calories} kcal (±50); they w
   } catch (error) {
     console.error('Generate plan error:', error)
     return Response.json(
-      { success: false, error: 'Failed to generate plans', details: error.message },
+      { success: false, error: 'Failed to generate plans', details: formatAnthropicError(error) },
       { status: 500 }
     )
   }

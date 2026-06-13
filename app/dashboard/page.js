@@ -7,6 +7,7 @@ import { useRouter } from 'next/navigation'
 import { motion } from 'framer-motion'
 import { supabase } from '../../lib/supabase'
 import { getTrainer } from '../../lib/trainers'
+import { authJsonHeaders as jsonHeadersWithAuth } from '../../lib/auth-fetch-headers'
 import { useAuth } from '../components/AuthProvider'
 import BrandedAuthLoading from '../components/BrandedAuthLoading'
 import ProfileLoadRecovery from '../components/ProfileLoadRecovery'
@@ -29,15 +30,6 @@ const BodyFatLineChart = dynamic(
   () => import('../components/ProgressCharts').then((m) => m.BodyFatLineChart),
   { ssr: false, loading: () => null }
 )
-
-async function jsonHeadersWithAuth() {
-  const headers = {}
-  if (supabase) {
-    const { data: { session } } = await supabase.auth.getSession()
-    if (session?.access_token) headers.Authorization = `Bearer ${session.access_token}`
-  }
-  return headers
-}
 
 async function fetchDashboardPlans([, profileId]) {
   if (!supabase) return []
@@ -422,10 +414,7 @@ export default function Dashboard() {
       const tid = profile.trainer || 'bro'
       const res = await fetch('/api/generate-plan', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(await jsonHeadersWithAuth()),
-        },
+        headers: await jsonHeadersWithAuth(),
         body: JSON.stringify({
           profileId: profile.id,
           profile: { ...profile, trainer: tid },

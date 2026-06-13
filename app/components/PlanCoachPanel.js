@@ -1,19 +1,8 @@
 'use client'
 
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { supabase } from '../../lib/supabase'
 import { mealPlanAuthoritativeSummary } from '../../lib/meal-plan-summary'
-
-async function jsonHeadersWithAuth() {
-  const headers = { 'Content-Type': 'application/json' }
-  if (supabase) {
-    const {
-      data: { session },
-    } = await supabase.auth.getSession()
-    if (session?.access_token) headers.Authorization = `Bearer ${session.access_token}`
-  }
-  return headers
-}
+import { authJsonHeaders as jsonHeadersWithAuth } from '../../lib/auth-fetch-headers'
 
 function excerptPlan(obj, max = 3800) {
   if (!obj) return ''

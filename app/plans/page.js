@@ -17,22 +17,7 @@ import { compressImageForUpload } from '../../lib/image-compress'
 import PlanCoachPanel from '../components/PlanCoachPanel'
 import { computeNutritionTargets } from '../../lib/nutrition-targets'
 import { parseDailyCaloriesNumber } from '../../lib/meal-plan-summary'
-
-async function jsonHeadersWithAuth() {
-  const headers = { 'Content-Type': 'application/json' }
-  if (!supabase) return headers
-  let {
-    data: { session },
-  } = await supabase.auth.getSession()
-  if (!session?.access_token) {
-    const { data: refreshed } = await supabase.auth.refreshSession()
-    session = refreshed?.session ?? null
-  }
-  if (session?.access_token) {
-    headers.Authorization = `Bearer ${session.access_token}`
-  }
-  return headers
-}
+import { authJsonHeaders as jsonHeadersWithAuth } from '../../lib/auth-fetch-headers'
 
 /** Turn analyze-meal / analyze-meal-text JSON into one line for eatingToday / generate-plan context. */
 function formatMealAnalysisForPlanContext(a, source) {

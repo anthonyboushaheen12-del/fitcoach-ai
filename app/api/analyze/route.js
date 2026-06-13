@@ -1,4 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk'
+import { getClaudeModel } from '../../../lib/anthropic-config'
 import { createClient } from '@supabase/supabase-js'
 
 function getSupabase() {
@@ -78,7 +79,7 @@ Body images: ${bodyImagesNote}
 `.trim()
 
     const response = await anthropic.messages.create({
-      model: 'claude-sonnet-4-20250514',
+      model: getClaudeModel(),
       max_tokens: 1024,
       system: `You are an analysis assistant for a fitness app. Review the user's meals, workouts, and body photos (current and goal reference - the goal may be an image of someone else whose body they want to achieve). Summarize their habits, compare current vs target if applicable, identify gaps, and recommend whether they would benefit from a structured workout and/or meal plan. Be concise, constructive, and encouraging.`,
       messages: [{

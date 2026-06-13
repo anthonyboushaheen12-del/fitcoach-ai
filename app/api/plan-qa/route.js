@@ -1,4 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk'
+import { getClaudeModel } from '../../../lib/anthropic-config'
 import { getTrainer, buildSystemPrompt, buildOnboardingContextPrompt } from '../../../lib/trainers'
 import { createSupabaseUserJwtClient, getBearerToken } from '../../../lib/supabase-api-route'
 import { mealPlanAuthoritativeSummary } from '../../../lib/meal-plan-summary'
@@ -102,7 +103,7 @@ ${typeof mealExcerpt === 'string' ? mealExcerpt : 'None active.'}
     messages.push({ role: 'user', content: question.trim() })
 
     const response = await anthropic.messages.create({
-      model: 'claude-sonnet-4-20250514',
+      model: getClaudeModel(),
       max_tokens: 768,
       system: systemPrompt,
       messages,

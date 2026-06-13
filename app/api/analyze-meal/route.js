@@ -1,4 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk'
+import { getClaudeModel } from '../../../lib/anthropic-config'
 import { createSupabaseUserJwtClient, getBearerToken } from '../../../lib/supabase-api-route'
 import {
   extractJsonObject,
@@ -82,7 +83,7 @@ export async function POST(request) {
     const mt = ['image/jpeg', 'image/png', 'image/webp'].includes(mediaType) ? mediaType : 'image/jpeg'
 
     const response = await anthropic.messages.create({
-      model: 'claude-sonnet-4-20250514',
+      model: getClaudeModel(),
       max_tokens: 1200,
       system: MEAL_JSON_SYSTEM,
       messages: [

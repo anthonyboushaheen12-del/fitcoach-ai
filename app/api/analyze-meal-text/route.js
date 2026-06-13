@@ -1,10 +1,11 @@
 import Anthropic from '@anthropic-ai/sdk'
-import { createSupabaseUserJwtClient, getBearerToken } from '../../../lib/supabase-api-route'
+import { getClaudeModel } from '../../../lib/anthropic-config'
 import {
   extractJsonObject,
   normalizeMealAnalysis,
   FALLBACK_MEAL_ANALYSIS,
 } from '../../../lib/meal-analysis'
+import { createSupabaseUserJwtClient, getBearerToken } from '../../../lib/supabase-api-route'
 
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY || '',
@@ -77,7 +78,7 @@ export async function POST(request) {
     }
 
     const response = await anthropic.messages.create({
-      model: 'claude-sonnet-4-20250514',
+      model: getClaudeModel(),
       max_tokens: 1200,
       system: MEAL_JSON_SYSTEM,
       messages: [
