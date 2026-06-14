@@ -18,6 +18,7 @@ import PlanCoachPanel from '../components/PlanCoachPanel'
 import { computeNutritionTargets } from '../../lib/nutrition-targets'
 import { parseDailyCaloriesNumber } from '../../lib/meal-plan-summary'
 import { authJsonHeaders as jsonHeadersWithAuth } from '../../lib/auth-fetch-headers'
+import { formatApiErrorBody } from '../../lib/api-error'
 
 /** Turn analyze-meal / analyze-meal-text JSON into one line for eatingToday / generate-plan context. */
 function formatMealAnalysisForPlanContext(a, source) {
@@ -787,7 +788,7 @@ export default function Plans() {
     const data = await res.json().catch(() => ({}))
     if (!res.ok || !data.success) {
       throw new Error(
-        data.error || data.details || `Plan generation failed (${res.status}). Try again.`
+        formatApiErrorBody(data, `Plan generation failed (${res.status}). Try again.`)
       )
     }
     await Promise.all([loadPlans(profile.id), refreshProfile()])
@@ -827,7 +828,7 @@ export default function Plans() {
     const data = await res.json().catch(() => ({}))
     if (!res.ok || !data.success) {
       throw new Error(
-        data.error || data.details || `Meal plan generation failed (${res.status}). Try again.`
+        formatApiErrorBody(data, `Meal plan generation failed (${res.status}). Try again.`)
       )
     }
     await Promise.all([loadPlans(profile.id), refreshProfile()])

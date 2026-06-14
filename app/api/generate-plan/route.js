@@ -541,8 +541,9 @@ Meal calorie numbers should sum to about ${targets.calories} kcal (±50); they w
     })
   } catch (error) {
     console.error('Generate plan error:', error)
+    const userMessage = formatAnthropicError(error)
     return Response.json(
-      { success: false, error: 'Failed to generate plans', details: formatAnthropicError(error) },
+      { success: false, error: userMessage, details: userMessage },
       { status: 500 }
     )
   }
